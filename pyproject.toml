@@ -1,0 +1,35 @@
+[project]
+name = "techstack-expense"
+version = "0.1.0"
+description = "Agentic AI expense-approval system for Techstack.io: rules engine, LLM review with a verifier model, and human-in-the-loop approval."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "faker>=40.54.0",
+    "jevals>=0.1.4",
+    "langchain>=1.5.0",
+    "langchain-anthropic>=1.7.10",
+    "langchain-openai>=1.8.0",
+    "langfuse>=5.2.0",
+    "langgraph>=1.2.22",
+    "mlflow>=3.18.0",
+    "numpy>=2.5.4",
+    "openpyxl>=3.1.5",
+    "pandas>=3.1.1",
+    "pillow>=13.0.0",
+    "pydantic>=2.14.3",
+    "python-dotenv>=1.2.4",
+    "pyyaml>=6.0.3",
+    "reportlab>=5.1.0",
+    "scikit-learn>=1.9.1",
+    "streamlit>=1.67.0",
+]
+
+[dependency-groups]
+dev = [
+    "ipykernel>=7.4.0",
+    "ipytest>=0.14.2",
+    "nbqa>=1.10.0",
+    "pytest>=9.2.0",
+    "ruff>=0.17.5",
+]

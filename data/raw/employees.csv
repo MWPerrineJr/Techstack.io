@@ -1,0 +1,11 @@
+employee_id,employee_name,title,department,home_city,manager_id
+E001,Priya Raman,Director of Engineering,Engineering,"Austin, TX",E010
+E002,Kevin Ortiz,Senior Software Engineer,Engineering,"Austin, TX",E001
+E003,Lena Brooks,ML Engineer,Engineering,"Denver, CO",E001
+E004,Dana Whitfield,VP of Sales,Sales,"Chicago, IL",E010
+E005,Jamal Carter,Account Executive,Sales,"Dallas, TX",E004
+E006,Sofia Nguyen,Account Executive,Sales,"San Francisco, CA",E004
+E007,Ethan Kim,Marketing Manager,Marketing,"New York, NY",E010
+E008,Rachel Adler,Content Strategist,Marketing,"Seattle, WA",E007
+E009,Tom Becker,Operations Manager,Operations,"San Antonio, TX",E010
+E010,Marcus Hale,Chief Financial Officer,Finance,"San Antonio, TX",BOARD

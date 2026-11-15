@@ -1,0 +1,22 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Secrets
+.env
+
+# Notebooks, ML runs, generated data
+.ipynb_checkpoints/
+mlruns/
+mlflow.db
+data/receipts/
+
+# macOS
+.DS_Store

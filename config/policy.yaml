@@ -1,0 +1,67 @@
+# Techstack.io Expense Policy — machine-readable config (v1.0)
+# Single source of truth for all numeric limits. docs/expense_policy.md describes the same rules in prose.
+version: "1.0"
+effective_date: "2026-01-01"
+currency: USD
+
+submission:
+  max_days_after_expense: 60          # POL-1.2
+  receipt_required_over: 75.00        # POL-1.3
+
+escalation:                           # POL-5
+  high_value_threshold: 1000.00       # single item above this -> human review
+  near_cap_pct: 0.10                  # within 10% below a cap -> human review
+  min_agent_confidence: 0.75          # below this -> human review
+  finance_review_threshold: 1000.00   # tier-2 (Finance) after manager
+
+city_tiers:
+  high_cost: ["New York, NY", "San Francisco, CA", "Boston, MA", "Seattle, WA", "Washington, DC", "Los Angeles, CA"]
+  # every other city is "standard"
+
+categories:
+  Airfare:                            # POL-2.1
+    allowed_fare_classes: ["Economy", "Premium Economy"]
+    business_class_min_flight_hours: 6
+    business_class_requires_preapproval: true
+  Lodging:                            # POL-2.2
+    nightly_cap:
+      standard: 250.00
+      high_cost: 350.00
+  Meals:                              # POL-2.3 (traveler's own meals, per day)
+    daily_per_diem: 75.00
+  Client Meals:                       # POL-2.4
+    per_person_cap: 100.00
+    requires_attendees: true
+  Ground Transport:                   # POL-2.5
+    allowed_rental_classes: ["Economy", "Compact", "Mid-size"]
+  Mileage:                            # POL-2.6 (IRS business rate, date-dependent)
+    rates:
+      - {from: "2026-01-01", to: "2026-06-30", rate: 0.725}
+      - {from: "2026-07-01", to: "2026-12-31", rate: 0.76}
+  Conference:                         # POL-2.7
+    per_event_cap: 2000.00
+    requires_preapproval: true
+  Software:                           # POL-2.8
+    approved_vendors: ["GitHub", "JetBrains", "Figma", "Notion", "Zoom", "Atlassian", "Slack", "OpenAI", "Anthropic"]
+  Home Office:                        # POL-2.9
+    per_purchase_cap: 500.00
+  Office Supplies:                    # POL-2.10
+    per_purchase_cap: 150.00
+
+prohibited:                           # POL-3
+  - {code: ALCOHOL_NO_CLIENT, text: "Alcohol not part of a client entertainment meal"}
+  - {code: PERSONAL_ITEM,     text: "Personal items, including electronics for personal use"}
+  - {code: GIFT_CARD,         text: "Gift cards or cash equivalents"}
+  - {code: FINE,              text: "Traffic, parking, or other fines and penalties"}
+  - {code: FAMILY_TRAVEL,     text: "Travel costs for spouses, family, or guests"}
+  - {code: WELLNESS_ENTERTAINMENT, text: "Spa, gym, in-room movies, personal entertainment"}
+
+violation_codes:                      # labels used in ground truth + rules engine
+  over_cap: "Amount exceeds the category limit"
+  prohibited_category: "Expense type is prohibited (POL-3)"
+  missing_receipt: "No receipt for an item over the receipt threshold"
+  late_submission: "Submitted more than 60 days after the expense date"
+  duplicate: "Same employee, date, merchant and amount already claimed"
+  split_transaction: "Purchase split across claims to stay under a cap"
+  personal_extension: "Personal / weekend extension of a business trip"
+  premium_class: "Business/first class without meeting policy conditions"
