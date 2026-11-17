@@ -159,8 +159,15 @@ from dotenv import load_dotenv
 
 load_dotenv("../.env")
 
-required = ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "TYPESAFE_API_KEY",
-            "LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "OPENAI_MODEL", "ANTHROPIC_MODEL"]
+required = [
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "TYPESAFE_API_KEY",
+    "LANGFUSE_PUBLIC_KEY",
+    "LANGFUSE_SECRET_KEY",
+    "OPENAI_MODEL",
+    "ANTHROPIC_MODEL",
+]
 missing = [k for k in required if not os.getenv(k)]
 print("Missing:", missing or "none ✅")
 ```
