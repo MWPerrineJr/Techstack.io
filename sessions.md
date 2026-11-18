@@ -481,6 +481,106 @@ for name, path in paths.items():
 print(f"{len(json_back['reports'])} reports, {n_items} claims exported")
 ```
 
+### Plan change — 2026-11-18 — Data analysis, visualizations and forecasting added
+**Decision:** add summary statistics, visualizations and forecasting to the notebooks **and** to the deployed app. No renumbering, so all existing references (e.g. "notebook 03 catches 51 of 82") stay valid.
+
+| # | Notebook | Change |
+|---|---|---|
+| 00 | setup | done |
+| 01 | generate_data | + **section 7: spend-history generator** |
+| **01b** | **explore_data** | 🆕 summary statistics + visualizations |
+| 02 | generate_receipts | unchanged |
+| 03 | policy_rules | unchanged |
+| 04 | anomaly_model | unchanged; uses features found in 01b |
+| **04b** | **spend_forecast** | 🆕 forecasting + backtesting |
+| 05 | agent_graph | + optional "department at X% of forecast" context signal |
+| 06 | evaluation | + charts: confusion-matrix heatmap, $ leaked by violation type, review-queue volume |
+| app | Streamlit | + **Analytics** and **Forecast** pages |
+
+**Why here:** EDA right after the data exists (understand before modeling; findings feed 03 thresholds and 04 features). Forecasting beside the anomaly model (both classical ML, both MLflow, both need leakage-safe time handling).
+
+**Constraint:** claims cover only 6 months (May–Oct 2026), too few points to forecast or backtest. Section 7 generates a separate history; the labeled claims set (and every evaluation number) stays unchanged.
+
+**Defaults chosen:** forecast target = **monthly spend by department** (budgeting); history = **36 months, weekly**, by department (3 full seasonal cycles). Weekly review-queue volume is a possible stretch target.
+
+#### 01 section 7 — spend history
+1. `generate_spend_history(start, months, rand)`: weekly spend per department = trend × seasonality (Q4 conference spike, summer travel, December dip) × noise; parameters as named constants; scaled to the same 10-person company
+2. Export `data/generated/spend_history.csv`
+3. Checks: no gaps in the weekly index, all values positive, planted Q4 peak visible in monthly totals
+
+#### 01b_explore_data.ipynb — summary statistics + visualizations
+0. Notebook → module: move `load_dataset`, `clean_cap`, `city_tier`, `load_policy` into `src/expense_agent/` with tests (notebooks can't import from each other)
+1. Data profile: dtypes, null %, `describe()`, cardinality → small data dictionary
+2. Summary stats: spend by category / department / employee with named `groupby().agg()` (count, sum, mean, median, p90)
+3. Distributions: amount histogram (log scale), box plots by category, amount as % of cap
+4. Time patterns: monthly spend, day-of-week mix, submission lag vs the 60-day limit
+5. Label-aware view (understanding only): violation rate by category/department, in- vs out-of-policy amounts, chi-square test of violations vs department (expect non-significant: violations were planted at random)
+6. Findings: 3–5 written bullets, each tagged with the notebook it feeds (03 or 04)
+- Gate: reproducible charts, every title states the takeaway, findings written
+- Teach: one plotting style helper; labeled axes and units; label-aware EDA must not tune the anomaly model (leakage)
+
+#### 04b_spend_forecast.ipynb — forecasting
+1. Load history, resample monthly, STL decomposition (recover the planted trend and seasonality)
+2. Baselines: naive and seasonal-naive (every model must beat them)
+3. Holt-Winters / ETS (`statsmodels`)
+4. `HistGradientBoostingRegressor` on lag, rolling-mean and month features (no leakage)
+5. Rolling-origin backtest; metrics MAE and MASE
+6. Prediction intervals; 3-month forecast chart per department
+7. MLflow: one run per model (params, metrics, backtest plot); register the best model for the app
+- Gate: best model beats seasonal-naive on MASE; runs visible in MLflow; a written paragraph on when to trust the forecast
+
+#### Deployed app — analytics in Streamlit
+- **Analytics page:** KPI tiles (total spend, claims, approve/deny/review mix, violation rate); filters (department, category, date range); spend by category, monthly trend, amount-vs-cap distribution, violation rate by department; summary-stats table
+- **Forecast page:** 3-month forecast per department with intervals, actual vs forecast, budget variance
+- **Single source of truth:** stats, chart and forecast functions live in `src/expense_agent/analytics.py` and `forecast.py`, used by both notebooks and the app (no copy-pasted logic)
+- App loads the registered forecast model from MLflow (or a saved artifact) instead of retraining on page load; `st.cache_data` for data, `st.cache_resource` for the model
+- Decide at app stage: interactive chart library, Altair (already bundled with Streamlit) vs Plotly
+- Tests: Analytics page numbers match the 01b summary table; forecast loads and predicts the right horizon
+- Docker image includes the model artifact
+
+**Setup (Mac Terminal, when we reach 01b):** `uv add matplotlib seaborn statsmodels`
+
+**Open items (added)**
+- [ ] Finish 01: 6e validation, then section 7 (spend history)
+- [ ] 01b explore_data (module move first)
+- [ ] 04b spend_forecast after 04
+- [ ] App: Analytics + Forecast pages
+- [ ] Mentor skill updated with 01 section 7, 01b, 04b and app analytics (proposed 2026-11-18)
+
+### Session 4 — 2026-11-18 — Notebook 01 complete (6d, 6e, 7a)
+**Done**
+- 6d export → `data/generated/`: expense_reports CSV (90,619 B) / XLSX (47,325 B) / nested JSON (253,772 B) + `ground_truth_labels.csv` (15,436 B); read-back checks pass; 100 reports, 330 claims
+- 6e validation (reads files only): schema matches reference; 0 in-policy claims break a hard rule (checked on generated AND reference data); duplicates detectable from files; out of policy 24.8%, borderline 4.8%
+  - Decisions: generated 231 / 82 / 17 vs reference 228 / 82 / 18 (approve / deny / review)
+  - Simple hard rules (late, receipt, over cap) catch 43 of 82; not caught: prohibited 17, duplicate 7, premium 6, extension 6, split 3
+- 7a spend history → `data/generated/spend_history.csv`: 780 rows (156 weeks × 5 depts), 2023-11-06 → 2026-10-26; growth +15.8% (planted 1.08² ≈ +16.6%); calibration 1.08x vs claims; seasonal index Dec 0.65 (min), Oct 1.22, Nov 1.19, Jun–Jul ≈ 1.14
+- Plan change logged (01 section 7, 01b, 04b, app Analytics + Forecast pages); mentor skill update proposed
+- `ruff check` + `ruff format --diff` clean (ruff defaults, 88 chars)
+
+**Findings**
+- Multi-violation claims: R-E005-04-L2 ($113.30) and R-E007-02-L4 ($109.67) are prohibited Meals that are also over the $75 per diem; labeled `prohibited_category` only. Kept on purpose (realistic) → 03 `run_rules()` returns every violation; 06 scores decisions, and a type counts as caught if it appears among the flags; 05 rationale cites every policy broken
+- Planted Nov (1.25) > Oct (1.20), but Oct comes out on top: the Octobers are 2024–26 and the Novembers 2023–25, so trend and seasonality are tangled → STL in 04b
+
+**Errors and fixes**
+- 6d `NameError: ROOT` → ran one cell on a fresh kernel (`In[1]`) → Restart → Run All
+- 7a `ValueError: truth value of a Series is ambiguous` → missing `.mean()` on `recent`; a Series reached `assert`
+- sessions.md: plan-change block was lost (likely an editor saving an older buffer) → restored; close or reload sessions.md in the editor before Claude writes to it
+
+**Learned**
+- Labels in a separate file joined on `claim_id`; `merge(validate=...)`; `Int64`; `date.isoformat`; `json.loads(df.to_json())`; verify writes by reading back
+- `keep_default_na=False` so empty label strings stay `""` and don't become NaN
+- Test the test: run the checker on the reference too
+- Independent RNG stream (`SEED + 1`) → that cell can rerun alone without shifting other data
+- Mean weekly spend per month avoids the 4-vs-5-week calendar effect
+- Traceback reading: `In[1]` on a non-first cell = fresh kernel; `NDFrame.__bool__` = Series where a bool was expected
+
+**Open items**
+- [ ] Delete scratch cell (`bad.loc[...]`) and the empty last cell in 01
+- [ ] Optional: `[tool.ruff] line-length = 79` (~70 lines currently over 79)
+- [ ] Mac Terminal: `uv add matplotlib seaborn statsmodels`
+- [ ] **Next: 01b cell 0, the module move (`load_dataset`, `clean_cap`, `city_tier`, `load_policy` → `src/expense_agent/` + tests); approval per file**
+- [ ] Carried over: `# Pol-1.3` → `POL-1.3`; `CLIENTS` missing Vandelay; `env.example` LANGFUSE_BASE_URL; leftover `gitignore.txt`, `sessions_2.md`, `main.py`; Jev API key
+
 ---
 
 # Appendix — Full file contents
