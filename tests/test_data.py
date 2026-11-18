@@ -6,6 +6,7 @@ import pandas as pd
 import pytest
 
 from expense_agent.data import (
+    CLAIM_DTYPES,
     CLAIMS_FILE,
     LABELS_FILE,
     load_claims,
@@ -46,3 +47,14 @@ def test_duplicate_label_rows_raise(tmp_path: Path) -> None:
     )
     with pytest.raises(pd.errors.MergeError):
         load_dataset(tmp_path)
+
+
+def test_count_columns_are_nullable_ints(tmp_path: Path) -> None:
+    (tmp_path / CLAIMS_FILE).write_text(
+        "claim_id,nights,attendees,miles\nC1,2,,\nC2,,4,120\n"
+    )
+    loaded = load_claims(tmp_path)
+    for column in CLAIM_DTYPES:
+        assert loaded[column].dtype == "Int64", column
+    assert loaded["nights"].isna().tolist() == [False, True]
+    

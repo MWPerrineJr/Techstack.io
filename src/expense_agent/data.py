@@ -6,11 +6,11 @@ import pandas as pd
 
 CLAIMS_FILE = "expense_reports.csv"
 LABELS_FILE = "ground_truth_labels.csv"
-
+CLAIM_DTYPES = {"nights": "Int64", "attendees": "Int64", "miles": "Int64"}
 
 def load_claims(folder: Path) -> pd.DataFrame:
     """Read the label-free import CSV (all the agent may ever see)."""
-    return pd.read_csv(folder / CLAIMS_FILE)
+    return pd.read_csv(folder / CLAIMS_FILE, dtype=CLAIM_DTYPES)
 
 
 def load_labels(folder: Path) -> pd.DataFrame:
