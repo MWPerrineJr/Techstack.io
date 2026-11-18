@@ -1,0 +1,331 @@
+claim_id,in_policy,violation_type,expected_decision,review_reason,is_borderline,label_note
+R-E001-01-L1,True,,approve,,False,
+R-E001-01-L2,True,,approve,,False,
+R-E001-01-L3,False,prohibited_category,deny,,False,GIFT_CARD
+R-E001-02-L1,True,,approve,,False,
+R-E001-02-L2,True,,approve,,False,
+R-E001-02-L3,True,,review,vague_purpose,True,business purpose too vague
+R-E001-03-L1,True,,approve,,False,
+R-E001-04-L1,True,,approve,,False,
+R-E001-05-L1,True,,approve,,False,
+R-E001-05-L2,False,over_cap,deny,,False,"$1,196.21 > $500.00"
+R-E001-05-L3,True,,approve,,False,
+R-E001-06-L1,True,,approve,,False,
+R-E001-06-L2,True,,approve,,False,
+R-E001-06-L3,True,,review,near_cap,True,$71.14 within 10% of $75.00
+R-E001-07-L1,True,,approve,,False,
+R-E001-07-L2,True,,approve,,False,
+R-E001-07-L3,False,premium_class,deny,,False,business class on 3.9h flight (< 6h)
+R-E001-07-L4,True,,approve,,False,
+R-E001-08-L1,True,,approve,,False,
+R-E001-08-L2,True,,approve,,False,
+R-E001-08-L3,True,,approve,,False,
+R-E001-08-L4,False,prohibited_category,deny,,False,WELLNESS_ENTERTAINMENT
+R-E001-09-L1,True,,approve,,False,
+R-E001-09-L2,True,,approve,,False,
+R-E001-10-L1,True,,approve,,False,
+R-E001-10-L2,False,missing_receipt,deny,,False,$232.09 with no receipt
+R-E002-01-L1,False,split_transaction,deny,,False,total $661.06 > $500.00 split across two lines (other part: R-E002-01-L2)
+R-E002-01-L2,True,,approve,,False,
+R-E002-02-L1,True,,approve,,False,
+R-E002-02-L2,True,,approve,,False,
+R-E002-02-L3,True,,approve,,False,
+R-E002-02-L4,False,missing_receipt,deny,,False,$136.39 with no receipt
+R-E002-03-L1,True,,approve,,False,
+R-E002-03-L2,True,,approve,,False,
+R-E002-03-L3,True,,approve,,False,
+R-E002-04-L1,True,,approve,,False,
+R-E002-05-L1,True,,approve,,False,
+R-E002-05-L2,True,,approve,,False,
+R-E002-05-L3,True,,approve,,False,
+R-E002-05-L4,True,,approve,,False,
+R-E002-06-L1,False,over_cap,deny,,False,daily meals $139.61 > $75.00
+R-E002-06-L2,True,,approve,,False,
+R-E002-06-L3,True,,approve,,False,
+R-E002-06-L4,True,,approve,,False,
+R-E002-07-L1,True,,approve,,False,
+R-E002-07-L2,True,,approve,,False,
+R-E002-07-L3,True,,review,vague_purpose,True,business purpose too vague
+R-E002-08-L1,True,,approve,,False,
+R-E002-08-L2,True,,review,vague_purpose,True,business purpose too vague
+R-E002-08-L3,True,,approve,,False,
+R-E002-09-L1,True,,approve,,False,
+R-E002-09-L2,False,late_submission,deny,,False,submitted 116 days after expense
+R-E002-10-L1,True,,approve,,False,
+R-E003-01-L1,True,,approve,,False,
+R-E003-01-L2,True,,approve,,False,
+R-E003-01-L3,False,personal_extension,deny,,False,weekend nights after the trip ended
+R-E003-01-L4,False,over_cap,deny,,False,"$2,758.80 > event cap $2,000.00"
+R-E003-02-L1,True,,approve,,False,
+R-E003-02-L2,True,,approve,,False,
+R-E003-03-L1,True,,approve,,False,
+R-E003-03-L2,True,,approve,,False,
+R-E003-03-L3,True,,approve,,False,
+R-E003-03-L4,False,split_transaction,deny,,False,total $625.50 > $500.00 split across two lines (other part: R-E003-03-L2)
+R-E003-04-L1,True,,approve,,False,
+R-E003-04-L2,True,,review,vague_purpose,True,business purpose too vague
+R-E003-04-L3,True,,approve,,False,
+R-E003-04-L4,True,,approve,,False,
+R-E003-05-L1,True,,approve,,False,
+R-E003-06-L1,True,,approve,,False,
+R-E003-06-L2,True,,approve,,False,
+R-E003-06-L3,False,duplicate,deny,,False,duplicate of R-E003-06-L1
+R-E003-07-L1,True,,approve,,False,
+R-E003-07-L2,True,,review,near_cap,True,nightly $244.31 within 10% of $250.00
+R-E003-07-L3,True,,approve,,False,
+R-E003-07-L4,False,premium_class,deny,,False,business class on 2.0h flight (< 6h)
+R-E003-08-L1,False,over_cap,deny,,False,nightly $294.67 > cap $250.00
+R-E003-08-L2,True,,approve,,False,
+R-E003-08-L3,False,duplicate,deny,,False,duplicate of R-E003-08-L2
+R-E003-09-L1,True,,approve,,False,
+R-E003-09-L2,True,,approve,,False,
+R-E003-09-L3,False,over_cap,deny,,False,per person $173.61 > $100.00
+R-E003-09-L4,True,,approve,,False,
+R-E003-10-L1,True,,approve,,False,
+R-E003-10-L2,True,,approve,,False,
+R-E003-10-L3,True,,approve,,False,
+R-E004-01-L1,True,,approve,,False,
+R-E004-01-L2,True,,approve,,False,
+R-E004-01-L3,True,,approve,,False,
+R-E004-01-L4,False,duplicate,deny,,False,duplicate of R-E004-01-L2
+R-E004-02-L1,True,,review,vague_purpose,True,business purpose too vague
+R-E004-02-L2,True,,approve,,False,
+R-E004-02-L3,True,,approve,,False,
+R-E004-02-L4,True,,approve,,False,
+R-E004-03-L1,True,,approve,,False,
+R-E004-03-L2,True,,approve,,False,
+R-E004-03-L3,True,,approve,,False,
+R-E004-03-L4,True,,approve,,False,
+R-E004-04-L1,False,personal_extension,deny,,False,weekend nights after the trip ended
+R-E004-04-L2,False,over_cap,deny,,False,"$2,582.48 > event cap $2,000.00"
+R-E004-04-L3,True,,approve,,False,
+R-E004-04-L4,True,,review,vague_purpose,True,business purpose too vague
+R-E004-05-L1,True,,approve,,False,
+R-E004-05-L2,True,,approve,,False,
+R-E004-05-L3,False,missing_receipt,deny,,False,$633.15 with no receipt
+R-E004-05-L4,False,over_cap,deny,,False,daily meals $179.41 > $75.00
+R-E004-05-L5,True,,approve,,False,
+R-E004-06-L1,False,split_transaction,deny,,False,total $570.70 > $500.00 split across two lines (other part: R-E004-06-L3)
+R-E004-06-L2,True,,approve,,False,
+R-E004-06-L3,True,,approve,,False,
+R-E004-06-L4,False,prohibited_category,deny,,False,GIFT_CARD
+R-E004-07-L1,True,,approve,,False,
+R-E004-07-L2,True,,approve,,False,
+R-E004-07-L3,True,,approve,,False,
+R-E004-07-L4,True,,approve,,False,
+R-E004-08-L1,True,,approve,,False,
+R-E004-08-L2,False,late_submission,deny,,False,submitted 84 days after expense
+R-E004-08-L3,True,,approve,,False,
+R-E004-08-L4,True,,approve,,False,
+R-E004-08-L5,True,,approve,,False,
+R-E004-09-L1,False,missing_receipt,deny,,False,$186.65 with no receipt
+R-E004-09-L2,True,,approve,,False,
+R-E004-10-L1,True,,approve,,False,
+R-E004-10-L2,False,personal_extension,deny,,False,weekend nights after the trip ended
+R-E004-10-L3,True,,approve,,False,
+R-E004-10-L4,False,over_cap,deny,,False,"$2,429.66 > event cap $2,000.00"
+R-E005-01-L1,True,,approve,,False,
+R-E005-01-L2,False,missing_receipt,deny,,False,$562.57 with no receipt
+R-E005-01-L3,True,,approve,,False,
+R-E005-02-L1,True,,approve,,False,
+R-E005-02-L2,True,,approve,,False,
+R-E005-02-L3,True,,approve,,False,
+R-E005-02-L4,False,prohibited_category,deny,,False,WELLNESS_ENTERTAINMENT
+R-E005-02-L5,True,,approve,,False,
+R-E005-03-L1,True,,approve,,False,
+R-E005-03-L2,True,,approve,,False,
+R-E005-03-L3,False,duplicate,deny,,False,duplicate of R-E005-03-L2
+R-E005-03-L4,True,,approve,,False,
+R-E005-03-L5,True,,approve,,False,
+R-E005-04-L1,False,over_cap,deny,,False,per person $134.43 > $100.00
+R-E005-04-L2,False,prohibited_category,deny,,False,ALCOHOL_NO_CLIENT
+R-E005-04-L3,False,over_cap,deny,,False,"$3,072.21 > event cap $2,000.00"
+R-E005-04-L4,True,,approve,,False,
+R-E005-05-L1,False,over_cap,deny,,False,daily meals $142.03 > $75.00
+R-E005-05-L2,True,,approve,,False,
+R-E005-05-L3,True,,approve,,False,
+R-E005-05-L4,True,,approve,,False,
+R-E005-06-L1,True,,approve,,False,
+R-E005-06-L2,False,duplicate,deny,,False,duplicate of R-E005-06-L1
+R-E005-06-L3,False,missing_receipt,deny,,False,$193.85 with no receipt
+R-E005-07-L1,True,,approve,,False,
+R-E005-07-L2,True,,approve,,False,
+R-E005-07-L3,True,,approve,,False,
+R-E005-07-L4,False,duplicate,deny,,False,duplicate of R-E005-07-L1
+R-E005-08-L1,True,,review,vague_purpose,True,business purpose too vague
+R-E005-08-L2,True,,approve,,False,
+R-E005-08-L3,True,,approve,,False,
+R-E005-08-L4,True,,approve,,False,
+R-E005-08-L5,True,,approve,,False,
+R-E005-09-L1,True,,approve,,False,
+R-E005-09-L2,True,,approve,,False,
+R-E005-09-L3,False,late_submission,deny,,False,submitted 113 days after expense
+R-E005-09-L4,True,,approve,,False,
+R-E005-10-L1,False,missing_receipt,deny,,False,$201.62 with no receipt
+R-E005-10-L2,True,,approve,,False,
+R-E005-10-L3,True,,approve,,False,
+R-E005-10-L4,True,,approve,,False,
+R-E006-01-L1,False,prohibited_category,deny,,False,GIFT_CARD
+R-E006-01-L2,True,,approve,,False,
+R-E006-02-L1,True,,approve,,False,
+R-E006-02-L2,False,prohibited_category,deny,,False,PERSONAL_ITEM
+R-E006-02-L3,True,,approve,,False,
+R-E006-02-L4,True,,approve,,False,
+R-E006-02-L5,True,,approve,,False,
+R-E006-03-L1,True,,approve,,False,
+R-E006-03-L2,True,,approve,,False,
+R-E006-03-L3,False,prohibited_category,deny,,False,FINE
+R-E006-03-L4,False,prohibited_category,deny,,False,FAMILY_TRAVEL
+R-E006-04-L1,False,over_cap,deny,,False,per person $124.27 > $100.00
+R-E006-04-L2,False,premium_class,deny,,False,business class without pre-approval
+R-E006-04-L3,True,,approve,,False,
+R-E006-04-L4,True,,approve,,False,
+R-E006-04-L5,False,missing_receipt,deny,,False,$357.21 with no receipt
+R-E006-05-L1,True,,approve,,False,
+R-E006-05-L2,True,,approve,,False,
+R-E006-05-L3,True,,approve,,False,
+R-E006-06-L1,True,,approve,,False,
+R-E006-06-L2,True,,approve,,False,
+R-E006-06-L3,True,,approve,,False,
+R-E006-06-L4,True,,approve,,False,
+R-E006-07-L1,True,,approve,,False,
+R-E006-07-L2,True,,approve,,False,
+R-E006-07-L3,True,,approve,,False,
+R-E006-08-L1,False,premium_class,deny,,False,business class on 3.2h flight (< 6h)
+R-E006-08-L2,True,,approve,,False,
+R-E006-08-L3,False,over_cap,deny,,False,per person $179.45 > $100.00
+R-E006-08-L4,True,,approve,,False,
+R-E006-08-L5,True,,approve,,False,
+R-E006-09-L1,True,,approve,,False,
+R-E006-09-L2,True,,approve,,False,
+R-E006-09-L3,True,,review,vague_purpose,True,business purpose too vague
+R-E006-09-L4,True,,approve,,False,
+R-E006-10-L1,True,,approve,,False,
+R-E006-10-L2,False,prohibited_category,deny,,False,FINE
+R-E006-10-L3,True,,review,vague_purpose,True,business purpose too vague
+R-E006-10-L4,True,,approve,,False,
+R-E007-01-L1,True,,approve,,False,
+R-E007-01-L2,True,,approve,,False,
+R-E007-02-L1,True,,review,vague_purpose,True,business purpose too vague
+R-E007-02-L2,False,prohibited_category,deny,,False,PERSONAL_ITEM
+R-E007-02-L3,True,,review,vague_purpose,True,business purpose too vague
+R-E007-02-L4,False,prohibited_category,deny,,False,ALCOHOL_NO_CLIENT
+R-E007-02-L5,False,prohibited_category,deny,,False,WELLNESS_ENTERTAINMENT
+R-E007-03-L1,True,,approve,,False,
+R-E007-04-L1,True,,approve,,False,
+R-E007-04-L2,False,missing_receipt,deny,,False,$452.17 with no receipt
+R-E007-04-L3,True,,review,high_value,False,"$1,297.47 > $1,000"
+R-E007-04-L4,True,,approve,,False,
+R-E007-04-L5,True,,approve,,False,
+R-E007-05-L1,True,,approve,,False,
+R-E007-05-L2,True,,approve,,False,
+R-E007-05-L3,True,,approve,,False,
+R-E007-05-L4,True,,approve,,False,
+R-E007-05-L5,True,,approve,,False,
+R-E007-06-L1,True,,approve,,False,
+R-E007-06-L2,True,,approve,,False,
+R-E007-06-L3,False,missing_receipt,deny,,False,$918.19 with no receipt
+R-E007-06-L4,False,prohibited_category,deny,,False,PERSONAL_ITEM
+R-E007-07-L1,True,,approve,,False,
+R-E007-07-L2,True,,approve,,False,
+R-E007-07-L3,True,,approve,,False,
+R-E007-08-L1,True,,approve,,False,
+R-E007-08-L2,True,,approve,,False,
+R-E007-08-L3,True,,approve,,False,
+R-E007-08-L4,True,,approve,,False,
+R-E007-08-L5,True,,approve,,False,
+R-E007-09-L1,False,prohibited_category,deny,,False,FINE
+R-E007-09-L2,True,,approve,,False,
+R-E007-10-L1,True,,approve,,False,
+R-E007-10-L2,True,,approve,,False,
+R-E007-10-L3,True,,approve,,False,
+R-E008-01-L1,True,,approve,,False,
+R-E008-02-L1,False,over_cap,deny,,False,$211.64 > $150.00
+R-E008-02-L2,True,,approve,,False,
+R-E008-03-L1,False,missing_receipt,deny,,False,$325.81 with no receipt
+R-E008-03-L2,False,prohibited_category,deny,,False,FAMILY_TRAVEL
+R-E008-03-L3,False,over_cap,deny,,False,"$2,239.55 > event cap $2,000.00"
+R-E008-03-L4,True,,approve,,False,
+R-E008-03-L5,False,late_submission,deny,,False,submitted 69 days after expense
+R-E008-04-L1,True,,approve,,False,
+R-E008-04-L2,True,,approve,,False,
+R-E008-04-L3,False,personal_extension,deny,,False,weekend nights after the trip ended
+R-E008-04-L4,True,,approve,,False,
+R-E008-05-L1,True,,approve,,False,
+R-E008-05-L2,True,,approve,,False,
+R-E008-05-L3,True,,approve,,False,
+R-E008-05-L4,True,,approve,,False,
+R-E008-05-L5,False,personal_extension,deny,,False,weekend nights after the trip ended
+R-E008-06-L1,True,,review,vague_purpose,True,business purpose too vague
+R-E008-06-L2,True,,approve,,False,
+R-E008-06-L3,True,,approve,,False,
+R-E008-07-L1,True,,approve,,False,
+R-E008-08-L1,True,,approve,,False,
+R-E008-08-L2,True,,review,near_cap,True,nightly $243.57 within 10% of $250.00
+R-E008-08-L3,True,,approve,,False,
+R-E008-08-L4,True,,approve,,False,
+R-E008-09-L1,False,late_submission,deny,,False,submitted 78 days after expense
+R-E008-09-L2,True,,approve,,False,
+R-E008-09-L3,True,,approve,,False,
+R-E008-09-L4,True,,approve,,False,
+R-E008-10-L1,False,late_submission,deny,,False,submitted 95 days after expense
+R-E008-10-L2,True,,approve,,False,
+R-E008-10-L3,False,late_submission,deny,,False,submitted 78 days after expense
+R-E009-01-L1,False,late_submission,deny,,False,submitted 120 days after expense
+R-E009-02-L1,True,,approve,,False,
+R-E009-02-L2,True,,approve,,False,
+R-E009-02-L3,False,prohibited_category,deny,,False,FINE
+R-E009-02-L4,True,,approve,,False,
+R-E009-03-L1,True,,approve,,False,
+R-E009-03-L2,False,over_cap,deny,,False,nightly $554.03 > cap $350.00
+R-E009-03-L3,False,premium_class,deny,,False,business class on 5.5h flight (< 6h)
+R-E009-03-L4,True,,approve,,False,
+R-E009-04-L1,False,prohibited_category,deny,,False,FAMILY_TRAVEL
+R-E009-04-L2,True,,approve,,False,
+R-E009-04-L3,True,,approve,,False,
+R-E009-04-L4,True,,approve,,False,
+R-E009-04-L5,False,missing_receipt,deny,,False,$368.85 with no receipt
+R-E009-05-L1,False,premium_class,deny,,False,business class on 3.9h flight (< 6h)
+R-E009-05-L2,False,prohibited_category,deny,,False,FINE
+R-E009-05-L3,True,,approve,,False,
+R-E009-05-L4,True,,approve,,False,
+R-E009-05-L5,True,,approve,,False,
+R-E009-06-L1,True,,approve,,False,
+R-E009-07-L1,True,,approve,,False,
+R-E009-07-L2,False,late_submission,deny,,False,submitted 96 days after expense
+R-E009-08-L1,True,,approve,,False,
+R-E009-08-L2,True,,approve,,False,
+R-E009-08-L3,True,,approve,,False,
+R-E009-08-L4,True,,approve,,False,
+R-E009-09-L1,True,,approve,,False,
+R-E009-10-L1,True,,approve,,False,
+R-E009-10-L2,False,personal_extension,deny,,False,weekend nights after the trip ended
+R-E010-01-L1,True,,approve,,False,
+R-E010-01-L2,True,,approve,,False,
+R-E010-01-L3,True,,approve,,False,
+R-E010-02-L1,True,,approve,,False,
+R-E010-03-L1,True,,approve,,False,
+R-E010-03-L2,True,,approve,,False,
+R-E010-03-L3,True,,review,near_cap,True,$148.61 within 10% of $150.00
+R-E010-04-L1,True,,approve,,False,
+R-E010-05-L1,True,,approve,,False,
+R-E010-05-L2,True,,approve,,False,
+R-E010-05-L3,True,,approve,,False,
+R-E010-05-L4,False,late_submission,deny,,False,submitted 95 days after expense
+R-E010-06-L1,False,late_submission,deny,,False,submitted 113 days after expense
+R-E010-06-L2,True,,approve,,False,
+R-E010-06-L3,False,duplicate,deny,,False,duplicate of R-E010-06-L2
+R-E010-07-L1,True,,approve,,False,
+R-E010-07-L2,True,,approve,,False,
+R-E010-07-L3,True,,approve,,False,
+R-E010-08-L1,True,,approve,,False,
+R-E010-08-L2,True,,approve,,False,
+R-E010-08-L3,True,,approve,,False,
+R-E010-08-L4,True,,approve,,False,
+R-E010-09-L1,True,,approve,,False,
+R-E010-09-L2,True,,approve,,False,
+R-E010-09-L3,True,,approve,,False,
+R-E010-10-L1,False,missing_receipt,deny,,False,$190.14 with no receipt
+R-E010-10-L2,True,,approve,,False,
+R-E010-10-L3,True,,approve,,False,
+R-E010-10-L4,False,missing_receipt,deny,,False,$132.62 with no receipt

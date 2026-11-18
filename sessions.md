@@ -341,6 +341,146 @@ _Add notes, errors and decisions from each working session below._
 - [ ] Carried over: `env.example` LANGFUSE_BASE_URL rename; leftover `gitignore.txt`, `sessions_2.md`, `main.py`; Jev API key
 - [ ] Next: 6d — save CSV/XLSX/JSON + ground truth to `data/generated/`, run validator, compare with reference
 
+### Session 3 (cont.) — 2026-11-17 — Cell 6d drafted, not yet run
+**Done**
+- Reviewed 6c: `is_borderline` count assert already restored; saved output approve 231 / deny 82 / review 17 (24.8% out of policy)
+- Cell 6d code written in chat (below), not yet typed or run: `build_export_table()`, `nest_reports()`, `write_outputs()` → `data/generated/` (CSV, XLSX, nested JSON, `ground_truth_labels.csv`) with read-back checks
+
+**Learned**
+- Labels live in a separate file joined on `claim_id`, so the agent can't see the answers
+- `merge(validate="many_to_one")` raises an error instead of silently duplicating rows
+- `Int64` (nullable int) keeps `nights`/`attendees`/`miles` as integers with blanks
+- `date.isoformat` gives sortable, portable date strings
+- `json.loads(df.to_json(orient="records"))` converts numpy ints and `pd.NA` to plain JSON
+- Check a write by reading the file back, not by trusting memory
+
+**Open items**
+- [ ] 6c fixes: `Answer-dey` → `Answer-key`, `bolds` → `holds`, `charged` → `changed`, `OF ${cap:,.2F}` → `of ${cap:,.2f}`, `assert  before_bad` → one space
+- [ ] `uv run ruff format notebooks`, then `uv run ruff check notebooks`; wrap lines over 79 chars by hand
+- [ ] Add `import json` to cell 1 (stdlib group)
+- [ ] **Next: type cell 6d (code below), Restart → Run All; expect "100 reports, 330 claims exported", review = 17**
+- [ ] Then 6e: validator checks vs reference dataset
+- [ ] Reflect: why does the answer key share only `claim_id` with the import files, and what breaks if `claim_id` isn't unique?
+- [ ] Carried over: `# Pol-1.3` → `POL-1.3` (cell 4b); `CLIENTS` missing Vandelay; `env.example` LANGFUSE_BASE_URL; leftover `gitignore.txt`, `sessions_2.md`, `main.py`; Jev API key
+
+**Cell 6d code**
+```python
+# 6d Export: import files (no labels) + answer key, to data/generated/
+OUT_DIR = ROOT / "data" / "generated"
+REPORT_COLS = [
+    "report_id",
+    "employee_id",
+    "employee_name",
+    "department",
+    "manager_id",
+    "report_title",
+    "submitted_date",
+    "currency",
+]
+ITEM_COLS = [
+    "claim_id",
+    "line_no",
+    "expense_date",
+    "category",
+    "merchant",
+    "description",
+    "business_purpose",
+    "amount",
+    "city",
+    "nights",
+    "attendees",
+    "attendee_names",
+    "fare_class",
+    "flight_hours",
+    "rental_class",
+    "miles",
+    "preapproved",
+    "receipt_attached",
+]
+IMPORT_COLS = REPORT_COLS[:-1] + ITEM_COLS[:8] + ["currency"] + ITEM_COLS[8:]
+LABEL_COLS = ["claim_id", *CLEAN_LABELS]
+INT_COLS = ["nights", "attendees", "miles"]
+
+
+def build_export_table(
+    claims: list[dict[str, Any]],
+    reports: list[dict[str, Any]],
+    employees: pd.DataFrame,
+) -> pd.DataFrame:
+    """Join claims with report and employee fields; one row per claim."""
+    titles = pd.DataFrame(reports)[["report_id", "report_title"]]
+    people = employees[["employee_id", "employee_name", "department", "manager_id"]]
+    flat = (
+        pd.DataFrame(claims)
+        .merge(titles, on="report_id", how="left", validate="many_to_one")
+        .merge(people, on="employee_id", how="left", validate="many_to_one")
+    )
+    flat["currency"] = "USD"
+    for col in ("expense_date", "submitted_date"):
+        flat[col] = flat[col].map(date.isoformat)
+    for col in INT_COLS:
+        flat[col] = flat[col].astype("Int64")
+    return flat.sort_values(["report_id", "line_no"]).reset_index(drop=True)
+
+
+def nest_reports(flat: pd.DataFrame) -> dict[str, Any]:
+    """Group flat rows into reports -> line_items (an app upload shape)."""
+    nested = []
+    for _, group in flat.groupby("report_id", sort=True):
+        header = group.iloc[0][REPORT_COLS].to_dict()
+        items = json.loads(group[ITEM_COLS].to_json(orient="records"))
+        nested.append({**header, "line_items": items})
+    return {"company": "Techstack.io", "reports": nested}
+
+
+def write_outputs(flat: pd.DataFrame, out_dir: Path) -> dict[str, Path]:
+    """Write the label-free import files and the separate answer key."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    paths = {
+        "csv": out_dir / "expense_reports.csv",
+        "xlsx": out_dir / "expense_reports.xlsx",
+        "json": out_dir / "expense_reports.json",
+        "labels": out_dir / "ground_truth_labels.csv",
+    }
+    imports = flat[IMPORT_COLS]
+    imports.to_csv(paths["csv"], index=False)
+    imports.to_excel(paths["xlsx"], index=False, sheet_name="claims")
+    paths["json"].write_text(json.dumps(nest_reports(imports), indent=2))
+    flat[LABEL_COLS].to_csv(paths["labels"], index=False)
+    return paths
+
+
+export_df = build_export_table(final_claims, reports, employees_df)
+paths = write_outputs(export_df, OUT_DIR)
+
+# --- checks (read the files back; never trust what is still in memory) ---
+csv_back = pd.read_csv(paths["csv"])
+xlsx_back = pd.read_excel(paths["xlsx"], sheet_name="claims")
+json_back = json.loads(paths["json"].read_text())
+labels_back = pd.read_csv(paths["labels"])
+
+assert set(IMPORT_COLS) & set(LABEL_COLS) == {"claim_id"}, "Label leak"
+assert list(csv_back.columns) == IMPORT_COLS, "CSV columns wrong"
+assert len(csv_back) == len(xlsx_back) == len(final_claims), "Row count"
+assert csv_back["claim_id"].is_unique, "Duplicate claim_id"
+assert export_df["employee_name"].notna().all(), "Employee join failed"
+assert export_df["report_title"].notna().all(), "Report join failed"
+
+n_items = sum(len(r["line_items"]) for r in json_back["reports"])
+assert len(json_back["reports"]) == len(reports), "JSON report count"
+assert n_items == len(final_claims), "JSON line-item count"
+
+joined = csv_back.merge(labels_back, on="claim_id", validate="one_to_one")
+assert (
+    joined["expected_decision"].value_counts().to_dict()
+    == final_df["expected_decision"].value_counts().to_dict()
+), "Labels don't round-trip"
+
+for name, path in paths.items():
+    print(f"{name:>6}: {path.relative_to(ROOT)} ({path.stat().st_size:,} B)")
+print(f"{len(json_back['reports'])} reports, {n_items} claims exported")
+```
+
 ---
 
 # Appendix — Full file contents
