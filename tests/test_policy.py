@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 from expense_agent.paths import POLICY_PATH
@@ -67,3 +68,16 @@ def test_uncapped_category_returns_none(policy: Policy) -> None:
 def test_unknown_category_raises(policy: Policy) -> None:
     with pytest.raises(KeyError):
         cap_usage({"category": "Yachts", "amount": 1.0}, policy)
+
+
+@pytest.mark.parametrize("nights", [None, float("nan"), pd.NA, 0])
+def test_lodging_without_valid_nights_returns_none(
+    policy: Policy, nights: object
+) -> None:
+    claim = {
+        "category": "Lodging",
+        "amount": 135.0,
+        "nights": nights,
+        "city": "Nowhere, ZZ",
+    }
+    assert cap_usage(claim, policy) is None

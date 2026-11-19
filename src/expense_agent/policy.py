@@ -3,6 +3,7 @@
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
 import yaml
 
 Policy = dict[str, Any]
@@ -41,8 +42,11 @@ def cap_usage(claim: dict[str, Any], policy: Policy) -> float:
     amount = claim["amount"]
     match claim["category"]:
         case "Lodging":
+            nights = claim.get("nights")
+            if pd.isna(nights) or nights <= 0:
+                return None
             tier = city_tier(claim["city"], policy)
-            return amount / claim["nights"], rules["nightly_cap"][tier]
+            return amount / nights, rules["nightly_cap"][tier]
         case "Meals":
             return amount, rules["daily_per_diem"]
         case "Client Meals":
