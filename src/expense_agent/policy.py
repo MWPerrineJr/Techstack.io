@@ -27,7 +27,7 @@ def city_tier(city: str, policy: Policy) -> str:
     return "high_cost" if city in high_cost else "standard"
 
 
-def cap_usage(claim: dict[str, Any], policy: Policy) -> float:
+def cap_usage(claim: dict[str, Any], policy: Policy) -> tuple[float, float] | None:
     """Return (value, cap) for a capped category, else None.
 
     ``value`` is what the cap applies to: the nightly rate for

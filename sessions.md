@@ -581,6 +581,67 @@ print(f"{len(json_back['reports'])} reports, {n_items} claims exported")
 - [ ] **Next: 01b cell 0, the module move (`load_dataset`, `clean_cap`, `city_tier`, `load_policy` → `src/expense_agent/` + tests); approval per file**
 - [ ] Carried over: `# Pol-1.3` → `POL-1.3`; `CLIENTS` missing Vandelay; `env.example` LANGFUSE_BASE_URL; leftover `gitignore.txt`, `sessions_2.md`, `main.py`; Jev API key
 
+### Session 5 — 2026-11-19 — 01b sections 0–6 complete
+
+**Done**
+- 01b cell 0 module move (done before this session): `src/expense_agent/`
+  `data.py` (load_claims / load_labels / load_dataset), `paths.py`,
+  `policy.py` (load_policy, city_tier, cap_usage) + `tests/test_data.py`,
+  `tests/test_policy.py`
+- `cap_usage`: return type → `tuple[float, float] | None`; Client Meals guard
+  for missing/zero attendees (returns None) + parametrized test
+- 01b sections 1–6: profile, summary stats, distributions (4a–4c), time
+  patterns (5a monthly + weekday, 5b submission lag), label-aware view
+  (6a violation rates + Wilson 95% CI, 6b amounts + late rule vs labels,
+  6c chi-square)
+
+**Results**
+- 330 claims, 82 out of policy (24.8%); total $117,377
+- 5a: expense dates 2026-02-21 → 2026-10-17; July peak; Feb–Apr + Oct partial
+  (gray); Monday = 45% of claims (generator artifact); weekend 14%
+- 5b/6b: 11 late (> 60 days); rule vs labels 11/11, 0 FP, 0 misses
+- 6a: Conference / Home Office 40% (wide CIs), Software 2/34, Mileage 0/7;
+  every department CI includes the overall rate
+- 6b: violations = 25% of claims, 46% of dollars; median $313 vs $207,
+  Mann-Whitney p < 0.001; distributions overlap heavily
+- 6c: department chi2 = 3.87, dof 4, p = 0.424, Cramér's V = 0.11 → no
+  evidence; category not tested (min expected 1.7 < 5)
+
+**Errors and fixes**
+- 4c `assert ...all` without `()` → always passed (method object is truthy)
+- 5a `NameError: claims` → was in the wrong notebook; then kernel restart
+  without Run All
+- 5a partial-month colors placed in 5b → drew on 5a's already-shown axes;
+  moved into 5a
+- 6a `AssertionError: rate outside its interval` → missing `~` on in_policy
+  (rates were ~75%); Wilson bound at 0%/100% off by ~1e-17 → clip bounds
+  to the rate
+- 6b title `$313 vs $207` rendered as math → `text.parse_math = False`
+
+**Learned**
+- Wilson intervals; float boundaries need clipping or tolerance; anchor
+  asserts to known reference numbers (24.8%)
+- Mann-Whitney for skewed amounts; report "p < 0.001", not "p = 0.000"
+- Chi-square: expected count ≥ 5; dof = (r−1)(c−1); Cramér's V as effect
+  size; "not significant" ≠ "no difference" (low power at n = 29)
+- A cell only draws on axes it created; Run All after editing `src/`
+
+**Decisions**
+- Label-aware rates never tune 03 rules or 04 features
+- 04: features relative to employee/category; weekend flag ok, no
+  day-of-week or department features
+- 06: report dollars leaked alongside false-approval count
+
+**Open items**
+- [ ] **Next: 01b section 7 Findings (markdown, 5 bullets tagged 03/04/04b/06)**
+- [ ] 01b gate: Restart → Run All clean; check 4a title for `$` math;
+      delete scratch cell; fix typos (`mots`, `zlate`, `day-o-week`)
+- [ ] `uv run ruff check` + `ruff format --diff` on notebooks/src/tests
+- [ ] Then 02_generate_receipts (or 03 first — decide next session)
+- [ ] Carried over: `# Pol-1.3` → `POL-1.3`; `CLIENTS` missing Vandelay;
+      `env.example` LANGFUSE_BASE_URL; leftover `gitignore.txt`,
+      `sessions_2.md`, `main.py`; Jev API key
+
 ---
 
 # Appendix — Full file contents
