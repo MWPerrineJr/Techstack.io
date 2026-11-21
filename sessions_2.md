@@ -191,7 +191,9 @@ primary = ChatOpenAI(model=os.getenv("OPENAI_MODEL"), temperature=0)
 checker = ChatAnthropic(model=os.getenv("ANTHROPIC_MODEL"), temperature=0)
 
 for name, llm in [("primary", primary), ("checker", checker)]:
-    reply = llm.invoke("Reply with exactly: OK", config={"callbacks": [handler]})
+    reply = llm.invoke(
+        "Reply with exactly: OK", config={"callbacks": [handler]}
+    )
     print(name, "→", reply.content)
 
 langfuse.flush()

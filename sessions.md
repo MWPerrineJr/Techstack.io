@@ -1,4 +1,4 @@
-# Techstack.io Expense Reporter & Approval Tool — Session Log
+`# Techstack.io Expense Reporter & Approval Tool — Session Log
 
 Project folder (local): `~/Techstack.io`
 Owner: Michael Perrine
@@ -191,7 +191,9 @@ primary = ChatOpenAI(model=os.getenv("OPENAI_MODEL"), temperature=0)
 checker = ChatAnthropic(model=os.getenv("ANTHROPIC_MODEL"), temperature=0)
 
 for name, llm in [("primary", primary), ("checker", checker)]:
-    reply = llm.invoke("Reply with exactly: OK", config={"callbacks": [handler]})
+    reply = llm.invoke(
+        "Reply with exactly: OK", config={"callbacks": [handler]}
+    )
     print(name, "→", reply.content)
 
 langfuse.flush()
@@ -409,7 +411,9 @@ def build_export_table(
 ) -> pd.DataFrame:
     """Join claims with report and employee fields; one row per claim."""
     titles = pd.DataFrame(reports)[["report_id", "report_title"]]
-    people = employees[["employee_id", "employee_name", "department", "manager_id"]]
+    people = employees[
+        ["employee_id", "employee_name", "department", "manager_id"]
+    ]
     flat = (
         pd.DataFrame(claims)
         .merge(titles, on="report_id", how="left", validate="many_to_one")
@@ -638,6 +642,80 @@ print(f"{len(json_back['reports'])} reports, {n_items} claims exported")
       delete scratch cell; fix typos (`mots`, `zlate`, `day-o-week`)
 - [ ] `uv run ruff check` + `ruff format --diff` on notebooks/src/tests
 - [ ] Then 02_generate_receipts (or 03 first — decide next session)
+- [ ] Carried over: `# Pol-1.3` → `POL-1.3`; `CLIENTS` missing Vandelay;
+      `env.example` LANGFUSE_BASE_URL; leftover `gitignore.txt`,
+      `sessions_2.md`, `main.py`; Jev API key
+
+### Session 6 — 2026-11-20 — 01b closed; 03 cells 1–6b
+
+**Done**
+- 01b section 7 Findings (5 bullets tagged 03/04/04b/06); gate passed:
+  removed unused `yaml`, import order fixed (`ruff check --fix`),
+  `ruff format .` applied (5 files, default 88 chars), pytest 19 passed
+- `policy.py`: Client Meals guard restored (missing/zero attendees →
+  None; the Session 5 edit had not reached disk); docstring typo fixed
+- `config/policy.yaml`: each `prohibited` entry now has `policy_ref`
+  (POL-3.1–3.6) and `keywords` (taken from the policy text, not the data)
+- 03_policy_rules.ipynb cells 1–6b:
+  1 imports, policy, claims (no labels; leakage assert)
+  2/2b `Claim` + `Violation` (Pydantic, frozen); `ViolationCode` Literal
+     matches policy.yaml; `policy_ref` pattern `^POL-\d+\.\d+$`
+  3/3b late (POL-1.2), receipt (POL-1.3) + boundary tests
+  4/4b caps via shared `cap_usage`; per-category refs; round to cents
+  5/5b fare class (POL-2.1), rental class (POL-2.5), mileage by date
+     (POL-2.6)
+  6/6b `Flag` model; prohibited-keyword hints; unapproved vendor
+
+**Results**
+- late 11, receipt 14, over_cap 18 → 43 claims (matches 6e exactly)
+- + premium_class 6 → 49 claims, 49 violations (no overlap)
+- rental 0, mileage 0; software: 34 claims, all approved → 0 flags
+- Cell 6: prohibited_hint count not recorded (fill in from cell 6);
+  unapproved_vendor 0
+
+**Errors and fixes**
+- `load_policy(path)` takes a file and `load_claims(folder)` a folder →
+  check with `help()` before calling
+- 2b: `err.error_count` without `()`; model field `details` vs `detail`
+  (`extra="forbid"` → 2 errors); test dict sent a *valid* `POL-2.2` →
+  the negative test passed for the wrong reason → assert on `err.errors()` loc
+- 4b ZeroDivisionError: guard missing on disk, then a stale kernel → restart
+- 5: `raise` inside the `for` loop in `mileage_rate` → dedent (search, then fail)
+- 5b: POL-2.8 false positives = typo in the software rule; querying the
+  data showed 0 unapproved vendors
+- 6: `compile_prohibited(Policy)` passed the type alias, not the data;
+  KeyError 'keywords' = stale `policy` in memory after the YAML edit
+
+**Decisions**
+- Violation = deny with a citation; Flag = review/hint
+  (prohibited_hint, unapproved_vendor, high_value, near_cap)
+- Unapproved software vendor → Flag (POL-2.8: "needs IT approval"),
+  not a deny
+- Prohibited: keyword hints in 03 + the agent makes the final call in 05;
+  keywords from the policy text only; "Fine dining" is a known false positive;
+  measure the real catch rate in 06 (synthetic text shares the policy's words)
+- Rental upgrade → `premium_class` (POL-2.5); mileage over → `over_cap` (POL-2.6)
+
+**Learned**
+- Negative tests must check *why* they fail; inspect `Model.model_fields`
+- `model_copy(update=...)` skips validation (tests only)
+- In memory vs on disk: restart after editing `src/` or YAML;
+  `%autoreload` reloads modules only, not loaded data
+- Recompute from the source when debugging, not from leftover variables
+- `PascalCase` = type, `snake_case` = data
+- Regex: `re.escape`, `\b...s?\b`, compile once
+- Ruff: import order rules, `check --fix && format`, `--diff`/`--check`
+  are read-only; the `except ... as err` name is deleted after the block
+
+**Open items**
+- [ ] **Next: 03 cell 7, escalation flags: high_value > $1,000
+      (POL-5.1), near_cap within 10% (POL-5.2)**
+- [ ] Then cross-claim rules: duplicates (keep first, POL-1.4), splits
+      (POL-1.5); `run_rules()`; ipytest tests; cell 8 score vs labels
+      (49 so far; expect 0 false positives)
+- [ ] Decide line length 79 vs 88; VS Code format-on-save
+- [ ] Import `Policy` from `expense_agent.policy` instead of redefining it
+- [ ] Mentor skill: add the Flag model + software-as-Flag correction
 - [ ] Carried over: `# Pol-1.3` → `POL-1.3`; `CLIENTS` missing Vandelay;
       `env.example` LANGFUSE_BASE_URL; leftover `gitignore.txt`,
       `sessions_2.md`, `main.py`; Jev API key
@@ -902,12 +980,47 @@ EMPLOYEES = [
         "Austin, TX",
         "E001",
     ),
-    ("E003", "Lena Brooks", "ML Engineer", "Engineering", "Denver, CO", "E001"),
+    (
+        "E003",
+        "Lena Brooks",
+        "ML Engineer",
+        "Engineering",
+        "Denver, CO",
+        "E001",
+    ),
     ("E004", "Dana Whitfield", "VP of Sales", "Sales", "Chicago, IL", "E010"),
-    ("E005", "Jamal Carter", "Account Executive", "Sales", "Dallas, TX", "E004"),
-    ("E006", "Sofia Nguyen", "Account Executive", "Sales", "San Francisco, CA", "E004"),
-    ("E007", "Ethan Kim", "Marketing Manager", "Marketing", "New York, NY", "E010"),
-    ("E008", "Rachel Adler", "Content Strategist", "Marketing", "Seattle, WA", "E007"),
+    (
+        "E005",
+        "Jamal Carter",
+        "Account Executive",
+        "Sales",
+        "Dallas, TX",
+        "E004",
+    ),
+    (
+        "E006",
+        "Sofia Nguyen",
+        "Account Executive",
+        "Sales",
+        "San Francisco, CA",
+        "E004",
+    ),
+    (
+        "E007",
+        "Ethan Kim",
+        "Marketing Manager",
+        "Marketing",
+        "New York, NY",
+        "E010",
+    ),
+    (
+        "E008",
+        "Rachel Adler",
+        "Content Strategist",
+        "Marketing",
+        "Seattle, WA",
+        "E007",
+    ),
     (
         "E009",
         "Tom Becker",
@@ -1111,7 +1224,9 @@ def clean_item(
     elif category == "Meals":
         c.update(
             merchant=rng.choice(MERCHANTS["Meals"]),
-            amount=money(rng.uniform(18, 0.89 * CAT["Meals"]["daily_per_diem"])),
+            amount=money(
+                rng.uniform(18, 0.89 * CAT["Meals"]["daily_per_diem"])
+            ),
             description="Traveler meals for the day",
         )
     elif category == "Client Meals":
@@ -1122,7 +1237,8 @@ def clean_item(
         c.update(
             merchant=rng.choice(MERCHANTS["Client Meals"]),
             attendees=n,
-            attendee_names="; ".join(f"{p} ({client})" for p in names) + "; employee",
+            attendee_names="; ".join(f"{p} ({client})" for p in names)
+            + "; employee",
             amount=money(pp * n),
             description=f"Client dinner with {client}, {n} attendees",
         )
@@ -1140,7 +1256,9 @@ def clean_item(
             )
         else:
             c.update(
-                merchant=rng.choice(["Uber", "Lyft", "Yellow Cab", "Airport Parking"]),
+                merchant=rng.choice(
+                    ["Uber", "Lyft", "Yellow Cab", "Airport Parking"]
+                ),
                 amount=money(rng.uniform(12, 85)),
                 description="Ride to client site / airport",
             )
@@ -1158,10 +1276,14 @@ def clean_item(
         c.update(
             merchant=conf,
             preapproved=True,
-            amount=money(rng.uniform(300, 0.89 * CAT["Conference"]["per_event_cap"])),
+            amount=money(
+                rng.uniform(300, 0.89 * CAT["Conference"]["per_event_cap"])
+            ),
             description=f"{conf} registration",
         )
-        c["business_purpose"] = f"Attend {conf} for training and customer networking"
+        c["business_purpose"] = (
+            f"Attend {conf} for training and customer networking"
+        )
     elif category == "Software":
         v = rng.choice(MERCHANTS["Software"])
         c.update(
@@ -1182,14 +1304,18 @@ def clean_item(
         c.update(
             merchant=rng.choice(MERCHANTS["Office Supplies"]),
             amount=money(
-                rng.uniform(8, 0.89 * CAT["Office Supplies"]["per_purchase_cap"])
+                rng.uniform(
+                    8, 0.89 * CAT["Office Supplies"]["per_purchase_cap"]
+                )
             ),
             description=rng.choice(SUPPLY_ITEMS),
         )
     # receipts: always for > threshold, mostly for small items
     thr = policy["submission"]["receipt_required_over"]
     if category != "Mileage":
-        c["receipt_attached"] = True if c["amount"] > thr else rng.random() < 0.8
+        c["receipt_attached"] = (
+            True if c["amount"] > thr else rng.random() < 0.8
+        )
     return c
 
 
@@ -1203,14 +1329,18 @@ def build_reports():
             items: list[dict] = []
             if travel:
                 dest = rng.choice([c for c in CITIES if c != home])
-                start = rand_date(WINDOW_START, WINDOW_END - timedelta(days=40))
+                start = rand_date(
+                    WINDOW_START, WINDOW_END - timedelta(days=40)
+                )
                 while (
                     start.weekday() > 2
                 ):  # trips start Mon–Wed so they end on weekdays
                     start += timedelta(days=1)
                 nights = rng.randint(1, 3)
                 end = start + timedelta(days=nights)
-                is_conf = dept in ("Engineering", "Marketing") and rng.random() < 0.4
+                is_conf = (
+                    dept in ("Engineering", "Marketing") and rng.random() < 0.4
+                )
                 client = rng.choice(CLIENTS)
                 purpose = (
                     f"Attend conference in {dest}"
@@ -1219,9 +1349,13 @@ def build_reports():
                 )
                 title_txt = purpose
                 items.append(clean_item("Airfare", start, dest, purpose))
-                items.append(clean_item("Lodging", start, dest, purpose, nights=nights))
+                items.append(
+                    clean_item("Lodging", start, dest, purpose, nights=nights)
+                )
                 if is_conf:
-                    items.append(clean_item("Conference", start, dest, purpose))
+                    items.append(
+                        clean_item("Conference", start, dest, purpose)
+                    )
                 for k in range(rng.randint(0, 2)):
                     items.append(
                         clean_item(
@@ -1241,11 +1375,15 @@ def build_reports():
                         )
                     )
                 if rng.random() < 0.5:
-                    items.append(clean_item("Ground Transport", start, dest, purpose))
+                    items.append(
+                        clean_item("Ground Transport", start, dest, purpose)
+                    )
                 items = items[:5]
                 last = end
             else:
-                month_end = rand_date(WINDOW_START + timedelta(days=25), WINDOW_END)
+                month_end = rand_date(
+                    WINDOW_START + timedelta(days=25), WINDOW_END
+                )
                 title_txt = f"Local expenses through {month_end:%b %d, %Y}"
                 pool = {
                     "Sales": [
@@ -1352,7 +1490,13 @@ PROHIBITED_TEMPLATES = [
         "WELLNESS_ENTERTAINMENT",
         (90, 220),
     ),
-    ("Lodging", "Marriott", "In-room movies", "WELLNESS_ENTERTAINMENT", (18, 40)),
+    (
+        "Lodging",
+        "Marriott",
+        "In-room movies",
+        "WELLNESS_ENTERTAINMENT",
+        (18, 40),
+    ),
     (
         "Airfare",
         "Delta Air Lines",
@@ -1383,7 +1527,13 @@ WEIGHTS = {
 def replace(c: dict, new: dict) -> None:
     keep = {
         k: c[k]
-        for k in ("report_id", "employee_id", "line_no", "claim_id", "submitted_date")
+        for k in (
+            "report_id",
+            "employee_id",
+            "line_no",
+            "claim_id",
+            "submitted_date",
+        )
     }
     c.clear()
     c.update(new)
@@ -1435,7 +1585,9 @@ def inject(claims: list[dict], reports: dict) -> None:
                 else ["Client Meals", "Home Office", "Office Supplies"]
             )
             cat = rng.choice(cats)
-            new = clean_item(cat, d, city, purpose, nights=c.get("nights") or 2)
+            new = clean_item(
+                cat, d, city, purpose, nights=c.get("nights") or 2
+            )
             if cat == "Lodging":
                 cap = CAT["Lodging"]["nightly_cap"][tier(city)]
                 nightly = cap * rng.uniform(1.15, 1.6)
@@ -1448,15 +1600,13 @@ def inject(claims: list[dict], reports: dict) -> None:
                 new["amount"] = money(
                     CAT["Meals"]["daily_per_diem"] * rng.uniform(1.3, 2.4)
                 )
-                note = (
-                    f"daily meals ${new['amount']} > ${CAT['Meals']['daily_per_diem']}"
-                )
+                note = f"daily meals ${new['amount']} > ${CAT['Meals']['daily_per_diem']}"
             elif cat == "Client Meals":
-                pp = CAT["Client Meals"]["per_person_cap"] * rng.uniform(1.2, 1.9)
-                new["amount"] = money(pp * new["attendees"])
-                note = (
-                    f"per person ${pp:,.2f} > ${CAT['Client Meals']['per_person_cap']}"
+                pp = CAT["Client Meals"]["per_person_cap"] * rng.uniform(
+                    1.2, 1.9
                 )
+                new["amount"] = money(pp * new["attendees"])
+                note = f"per person ${pp:,.2f} > ${CAT['Client Meals']['per_person_cap']}"
             elif cat == "Conference":
                 new["amount"] = money(
                     CAT["Conference"]["per_event_cap"] * rng.uniform(1.1, 1.6)
@@ -1464,7 +1614,8 @@ def inject(claims: list[dict], reports: dict) -> None:
                 note = f"${new['amount']} > event cap ${CAT['Conference']['per_event_cap']}"
             elif cat == "Home Office":
                 new["amount"] = money(
-                    CAT["Home Office"]["per_purchase_cap"] * rng.uniform(1.2, 2.5)
+                    CAT["Home Office"]["per_purchase_cap"]
+                    * rng.uniform(1.2, 2.5)
                 )
                 new["description"] = rng.choice(
                     [
@@ -1476,11 +1627,10 @@ def inject(claims: list[dict], reports: dict) -> None:
                 note = f"${new['amount']} > ${CAT['Home Office']['per_purchase_cap']}"
             else:
                 new["amount"] = money(
-                    CAT["Office Supplies"]["per_purchase_cap"] * rng.uniform(1.3, 2.5)
+                    CAT["Office Supplies"]["per_purchase_cap"]
+                    * rng.uniform(1.3, 2.5)
                 )
-                note = (
-                    f"${new['amount']} > ${CAT['Office Supplies']['per_purchase_cap']}"
-                )
+                note = f"${new['amount']} > ${CAT['Office Supplies']['per_purchase_cap']}"
             new["receipt_attached"] = True
 
         elif vtype == "prohibited_category":
@@ -1495,7 +1645,8 @@ def inject(claims: list[dict], reports: dict) -> None:
             )
             if cat == "Airfare":
                 new.update(
-                    fare_class="Economy", flight_hours=round(rng.uniform(1.5, 4.5), 1)
+                    fare_class="Economy",
+                    flight_hours=round(rng.uniform(1.5, 4.5), 1),
                 )
             note = code
 
@@ -1521,10 +1672,16 @@ def inject(claims: list[dict], reports: dict) -> None:
         elif vtype == "late_submission":
             new = dict(c)
             days_late = rng.randint(65, 120)
-            new["expense_date"] = c["submitted_date"] - timedelta(days=days_late)
-            new["description"] = new["description"] + " (missed in earlier report)"
+            new["expense_date"] = c["submitted_date"] - timedelta(
+                days=days_late
+            )
+            new["description"] = (
+                new["description"] + " (missed in earlier report)"
+            )
             if new["category"] == "Mileage":
-                new["amount"] = money(new["miles"] * mileage_rate(new["expense_date"]))
+                new["amount"] = money(
+                    new["miles"] * mileage_rate(new["expense_date"])
+                )
                 new["description"] = (
                     f"{new['miles']} business miles at ${mileage_rate(new['expense_date'])}/mile (missed in earlier report)"
                 )
@@ -1590,7 +1747,9 @@ def inject(claims: list[dict], reports: dict) -> None:
                     flight_hours=round(rng.uniform(2.0, 5.5), 1),
                     preapproved=True,
                 )
-                note = f"business class on {new['flight_hours']}h flight (< 6h)"
+                note = (
+                    f"business class on {new['flight_hours']}h flight (< 6h)"
+                )
             else:
                 new.update(
                     fare_class=rng.choice(["Business", "First"]),
@@ -1621,7 +1780,9 @@ def inject(claims: list[dict], reports: dict) -> None:
         )
 
     # ---------------------------------------------------- borderline (human review)
-    clean_idx = [i for i, c in enumerate(claims) if c["in_policy"] and i not in locked]
+    clean_idx = [
+        i for i, c in enumerate(claims) if c["in_policy"] and i not in locked
+    ]
     for i in rng.sample(clean_idx, round(BORDERLINE_RATE * n)):
         c = claims[i]
         caps = {
@@ -1640,8 +1801,13 @@ def inject(claims: list[dict], reports: dict) -> None:
             cap = CAT["Lodging"]["nightly_cap"][tier(c["city"])]
             nightly = cap * rng.uniform(0.92, 0.995)
             c["amount"] = money(nightly * c["nights"])
-            c["description"] = f"Hotel, {c['nights']} night(s) at ${nightly:,.2f}/night"
-            reason, note = "near_cap", f"nightly ${nightly:,.2f} within 10% of ${cap}"
+            c["description"] = (
+                f"Hotel, {c['nights']} night(s) at ${nightly:,.2f}/night"
+            )
+            reason, note = (
+                "near_cap",
+                f"nightly ${nightly:,.2f} within 10% of ${cap}",
+            )
         else:
             c["business_purpose"] = rng.choice(
                 ["Business", "Meeting", "Misc", "Work stuff", "Team"]
@@ -1657,7 +1823,11 @@ def inject(claims: list[dict], reports: dict) -> None:
     # high-value in-policy items -> review (POL-5.1)
     thr = policy["escalation"]["high_value_threshold"]
     for c in claims:
-        if c["in_policy"] and c["amount"] > thr and c["expected_decision"] == "approve":
+        if (
+            c["in_policy"]
+            and c["amount"] > thr
+            and c["expected_decision"] == "approve"
+        ):
             c.update(
                 expected_decision="review",
                 review_reason="high_value",
@@ -1725,7 +1895,9 @@ def main() -> None:
         emp[["employee_id", "employee_name", "department", "manager_id"]],
         on="employee_id",
     )
-    df["report_title"] = df["report_id"].map(lambda r: rep_by_id[r]["report_title"])
+    df["report_title"] = df["report_id"].map(
+        lambda r: rep_by_id[r]["report_title"]
+    )
     df["currency"] = "USD"
     for col in ("expense_date", "submitted_date"):
         df[col] = pd.to_datetime(df[col]).dt.date.astype(str)
@@ -1738,7 +1910,9 @@ def main() -> None:
     emp.to_csv(out / "employees.csv", index=False)
     imp = df[IMPORT_COLS]
     imp.to_csv(out / "expense_reports.csv", index=False)
-    imp.to_excel(out / "expense_reports.xlsx", index=False, sheet_name="claims")
+    imp.to_excel(
+        out / "expense_reports.xlsx", index=False, sheet_name="claims"
+    )
     df[LABEL_COLS].to_csv(out / "ground_truth_labels.csv", index=False)
 
     # JSON: nested reports -> line_items (the shape an API/app upload would use)
@@ -1816,7 +1990,9 @@ def flags(r):
         cat == "Lodging"
         and r.nights == r.nights
         and r.amount / r.nights
-        > C["Lodging"]["nightly_cap"]["high_cost" if r.city in HC else "standard"]
+        > C["Lodging"]["nightly_cap"][
+            "high_cost" if r.city in HC else "standard"
+        ]
     ):
         f.append("cap")
     if cat == "Meals" and r.amount > 75:
@@ -1842,7 +2018,9 @@ d["rf"] = d.apply(flags, axis=1)
 clean = d[d.in_policy]
 print("in-policy rows with hard-rule flags:", (clean.rf.str.len() > 0).sum())
 print(clean[clean.rf.str.len() > 0][["claim_id", "category", "amount", "rf"]])
-dup = d.duplicated(["employee_id", "expense_date", "merchant", "amount"], keep="first")
+dup = d.duplicated(
+    ["employee_id", "expense_date", "merchant", "amount"], keep="first"
+)
 print(
     "duplicates detected:",
     dup.sum(),
@@ -1853,7 +2031,10 @@ print(
 )
 v = d[~d.in_policy]
 print(
-    "violations caught by simple hard rules:", (v.rf.str.len() > 0).sum(), "of", len(v)
+    "violations caught by simple hard rules:",
+    (v.rf.str.len() > 0).sum(),
+    "of",
+    len(v),
 )
 print(v[v.rf.str.len() == 0].violation_type.value_counts())
 ````

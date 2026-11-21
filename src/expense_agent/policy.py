@@ -27,12 +27,14 @@ def city_tier(city: str, policy: Policy) -> str:
     return "high_cost" if city in high_cost else "standard"
 
 
-def cap_usage(claim: dict[str, Any], policy: Policy) -> tuple[float, float] | None:
+def cap_usage(
+    claim: dict[str, Any], policy: Policy
+) -> tuple[float, float] | None:
     """Return (value, cap) for a capped category, else None.
 
     ``value`` is what the cap applies to: the nightly rate for
     Lodging, the per-person amount for Client Meals, and the full
-    amount fir every other capped category.
+    amount for every other capped category.
 
 
     Raises:
@@ -50,7 +52,10 @@ def cap_usage(claim: dict[str, Any], policy: Policy) -> tuple[float, float] | No
         case "Meals":
             return amount, rules["daily_per_diem"]
         case "Client Meals":
-            return amount / claim["attendees"], rules["per_person_cap"]
+            attendees = claim.get("attendees")
+            if pd.isna(attendees) or attendees <= 0:
+                return None
+            return amount / attendees, rules["per_person_cap"]
         case "Conference":
             return amount, rules["per_event_cap"]
         case "Home Office" | "Office Supplies":

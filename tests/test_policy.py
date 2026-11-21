@@ -55,7 +55,9 @@ def test_client_meals_cap_is_per_person(policy: Policy) -> None:
         ("Office Supplies", "per_purchase_cap"),
     ],
 )
-def test_flat_caps_use_full_amount(policy: Policy, category: str, cap_key: str) -> None:
+def test_flat_caps_use_full_amount(
+    policy: Policy, category: str, cap_key: str
+) -> None:
     claim = {"category": category, "amount": 42.0}
     cap = policy["categories"][category][cap_key]
     assert cap_usage(claim, policy) == (42.0, cap)

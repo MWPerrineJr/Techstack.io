@@ -48,14 +48,31 @@ categories:
   Office Supplies:                    # POL-2.10
     per_purchase_cap: 150.00
 
-prohibited:                           # POL-3
-  - {code: ALCOHOL_NO_CLIENT, text: "Alcohol not part of a client entertainment meal"}
-  - {code: PERSONAL_ITEM,     text: "Personal items, including electronics for personal use"}
-  - {code: GIFT_CARD,         text: "Gift cards or cash equivalents"}
-  - {code: FINE,              text: "Traffic, parking, or other fines and penalties"}
-  - {code: FAMILY_TRAVEL,     text: "Travel costs for spouses, family, or guests"}
-  - {code: WELLNESS_ENTERTAINMENT, text: "Spa, gym, in-room movies, personal entertainment"}
-
+prohibited:                           # POL-3 (keywords = hints, not denials)
+  - code: ALCOHOL_NO_CLIENT
+    policy_ref: POL-3.1
+    text: "Alcohol not part of a client entertainment meal"
+    keywords: [alcohol, bar, drinks, beer, wine, cocktail, liquor]
+  - code: PERSONAL_ITEM
+    policy_ref: POL-3.2
+    text: "Personal items, including electronics for personal use"
+    keywords: [personal]
+  - code: GIFT_CARD
+    policy_ref: POL-3.3
+    text: "Gift cards or cash equivalents"
+    keywords: [gift card, cash equivalent, prepaid card]
+  - code: FINE
+    policy_ref: POL-3.4
+    text: "Traffic, parking, or other fines and penalties"
+    keywords: [fine, penalty, parking ticket, speeding ticket, citation]
+  - code: FAMILY_TRAVEL
+    policy_ref: POL-3.5
+    text: "Travel costs for spouses, family, or guests"
+    keywords: [spouse, family, guest, child, children]
+  - code: WELLNESS_ENTERTAINMENT
+    policy_ref: POL-3.6
+    text: "Spa, gym, in-room movies, personal entertainment"
+    keywords: [spa, gym, in-room, movie]
 violation_codes:                      # labels used in ground truth + rules engine
   over_cap: "Amount exceeds the category limit"
   prohibited_category: "Expense type is prohibited (POL-3)"

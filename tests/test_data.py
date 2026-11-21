@@ -28,7 +28,9 @@ def write_files(folder: Path, labels: dict[str, list[str]]) -> None:
 
 
 def test_join_keeps_empty_label_strings(tmp_path: Path) -> None:
-    write_files(tmp_path, {"claim_id": ["C1", "C2"], "violation_type": ["", "x"]})
+    write_files(
+        tmp_path, {"claim_id": ["C1", "C2"], "violation_type": ["", "x"]}
+    )
     data = load_dataset(tmp_path)
     assert len(data) == 2
     first = data.loc[data["claim_id"] == "C1", "violation_type"].item()
@@ -36,7 +38,9 @@ def test_join_keeps_empty_label_strings(tmp_path: Path) -> None:
 
 
 def test_claims_have_no_label_columns(tmp_path: Path) -> None:
-    write_files(tmp_path, {"claim_id": ["C1", "C2"], "violation_type": ["", "x"]})
+    write_files(
+        tmp_path, {"claim_id": ["C1", "C2"], "violation_type": ["", "x"]}
+    )
     assert "violation_type" not in load_claims(tmp_path).columns
 
 
@@ -57,4 +61,3 @@ def test_count_columns_are_nullable_ints(tmp_path: Path) -> None:
     for column in CLAIM_DTYPES:
         assert loaded[column].dtype == "Int64", column
     assert loaded["nights"].isna().tolist() == [False, True]
-    

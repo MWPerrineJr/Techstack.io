@@ -45,3 +45,6 @@ module-name = "expense_agent"
 
 [tool.pytest.ini_options]
 testpaths =["tests"]
+
+[tool.ruff]
+line-length = 79
