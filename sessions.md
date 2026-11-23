@@ -720,6 +720,140 @@ print(f"{len(json_back['reports'])} reports, {n_items} claims exported")
       `env.example` LANGFUSE_BASE_URL; leftover `gitignore.txt`,
       `sessions_2.md`, `main.py`; Jev API key
 
+### Session 7 — 2026-11-22 — 03 cells 7–9 (escalation, cross-claim, run_rules)
+
+**Done**
+- 7a/7b escalation Flags: `check_high_value` (POL-5.1, strictly > $1,000)
+  and `check_near_cap` (POL-5.2, band [cap × (1 − pct), cap], reuses
+  `cap_usage`); boundary tests incl. the $150.01 handoff to `check_cap`
+- 8a duplicates (POL-1.4): `claims_frame()` sorts by submitted_date then
+  file order; keys employee/date/merchant/amount_cents; keep first;
+  detail names the original claim
+- 8b splits (POL-1.5): only per-purchase/per-event caps (read from YAML);
+  every part ≤ cap and total > cap; first part stands; duplicates
+  excluded first via `skip_ids`
+- 8c tests: duplicate found by submission date (list passed reversed);
+  split over cap → 2nd part denied; total within cap → none
+- 9 `run_rules()`: one row per claim (rule_decision, violations, flags,
+  policy_refs, details); `collect_findings()` returns violations and
+  flags as separate lists; invariant asserts
+- Added `from collections import defaultdict` to cell 1
+- Cell 10 (score vs labels) drafted, not yet run
+
+**Results**
+- high_value 15, near_cap 4 → 19 claims (near_cap = the 4 planted
+  borderline items)
+- duplicates 7, splits 3, overlap with single-claim violations 0
+- run_rules: approve 240 / deny 59 / review 31
+- Violations caught: 59 of 82 (49 single-claim + 10 cross-claim)
+
+**Errors and fixes**
+- 8a KeyError `'merchant", "amount_cents'`: mixed quotes made two keys
+  one string → read the last traceback line; print the input
+- 8b detail `$661.06over`: adjacent f-strings join with no space → put
+  the space inside the first string
+
+**Decisions**
+- Precedence: any Violation → deny; else any Flag → review; else approve
+- Flags stay on denied rows (a resubmitted fix becomes review automatically)
+- Money compared in integer cents, never as floats
+- Splits stay a Violation for now (open question: Flag instead?)
+
+**Learned**
+- Chained comparison `lower <= value <= cap`; test both edges plus the
+  handoff between rules
+- `kind="stable"`, `groupby().transform("first")`, `itertuples()`
+- Extended unpacking `first, *rest = ...`; `found.extend(<generator>)`
+- `defaultdict(list)`; invariants as asserts; `Literal` for decisions
+- Adjacent string literals concatenate with nothing in between
+
+**Open items**
+- [ ] **Next: run 03 cell 10 (score vs labels): expect 59 of 82,
+      0 false positives; record false-approval rate + $ leaked as the
+      rules-only baseline for 06**
+- [ ] Reflect answers pending: two flags vs one in the router; split as
+      deny vs Flag; vague-purpose keyword Flag (POL-5.3) in 03 or the agent
+- [ ] Then ipytest tests (one pass/fail per rule); move rules into
+      `src/expense_agent/rules.py` + `tests/` (approval first);
+      `validate.py` PEP 8 refactor
+- [ ] Fix `Rule` / `apply_rules` type hints (they also return Flags)
+- [ ] Record the cell 6 prohibited_hint count
+- [ ] Carried over: line length 79 vs 88 + format-on-save; import `Policy`
+      from `expense_agent.policy`; mentor skill: Flag model +
+      software-as-Flag; `# Pol-1.3` → `POL-1.3`; `CLIENTS` missing
+      Vandelay; `env.example` LANGFUSE_BASE_URL; leftover `gitignore.txt`,
+      `sessions_2.md`, `main.py`; Jev API key
+
+### Session 8 — 2026-11-22 — 03 cell 10 (score vs labels); splits fixed
+
+**Done**
+- Cell 10 score vs labels (evaluation only): guard asserts (IDs match,
+  `in_policy` is bool), `merge(validate="one_to_one")`, catch rate,
+  type match, confusion matrix, false-approval baseline, misses by type
+- 10b/10c diagnostics: false positives traced to split pairs
+- 8b `check_splits` now denies **every part** of a split (POL-1.5:
+  the purchase is the violation); detail names the other part(s)
+- 8c split test → `sorted(...) == ["T-P1", "T-P2"]`
+- Cell 10 scores splits per purchase: `named_claims()` regex on
+  details; `same_purchase` excuses a clean half only if its sole
+  violation is split_transaction AND it names a labeled split
+
+**Results (rules-only baseline for 06)**
+- run_rules: approve 237 / deny 62 / review 31
+- Caught 59 of 82; labeled type among rule codes 57 (2 prohibited
+  meals denied as over_cap); false positives 0; same_purchase 3
+- False-approval rate **7.3% (6 of 82)**; dollars leaked **$2,394.30**
+  (all 6 = personal_extension)
+- Label deny sent to review: 17 ($2,900.89), all prohibited_category
+  (keyword hints; synthetic text shares policy words → recheck in 06)
+- Confusion matrix: approve→deny 3 (clean split halves, expected);
+  approve→review 6; **review→approve 9** (likely vague purpose,
+  POL-5.3)
+
+**Errors and fixes**
+- First run caught 57, not 59: the Session 7 "59" was the deny count,
+  never checked against labels. Split halves share report and
+  submitted_date, so the rule fell back to file order; the generator
+  labeled L1, the rule denied L2/L3 → 2 swaps
+- `label_deny.sum(())` → empty tuple passed as `axis` ("No axis
+  named ()")
+- `${leaked:.1%}` on money → use `:,.2f`; `%` only for rates
+- `policy_ref="PPL-1.5"` → caught by the Violation regex pattern
+- Placeholders `a, b` typed literally → NameError
+- Still 57 after the fix: `rule_results` stale (cell 9 not rerun) →
+  Restart & Run All
+
+**Decisions**
+- B + A: deny every split part (policy text) + score splits per
+  purchase; never flip a rule to match the answer key's convention
+- Weight deny→approve highest; track review→approve separately (POL-5
+  control skipped)
+
+**Learned**
+- Anchors must be verified against labels, not assumed
+- Traceback: last line first, then the `--->` in your own cell
+- Pydantic pattern validation catches bad citations at creation
+- A fixed function doesn't update results already computed → Run All
+- `zip` list comprehension over `apply(axis=1)`; `re.findall`;
+  narrow exceptions in scoring (all three conditions required)
+
+**Open items**
+- [ ] **Next: 03 cell 10d: group the 9 review→approve claims by
+      `review_reason`; decide vague-purpose Flag (POL-5.3) in 03 vs agent**
+- [ ] Delete or tidy 10b/10c (reuse `named_claims()`)
+- [ ] Reflect pending: split resubmission (approve $500 + deny excess?)
+      as an agent notification suggestion, not a rule
+- [ ] Then ipytest tests (one pass/fail per rule); move rules into
+      `src/expense_agent/rules.py` + `tests/` (approval first);
+      `validate.py` PEP 8 refactor
+- [ ] Fix `Rule` / `apply_rules` type hints (they also return Flags)
+- [ ] Record the cell 6 prohibited_hint count
+- [ ] Carried over: line length 79 vs 88 + format-on-save; import
+      `Policy` from `expense_agent.policy`; mentor skill: Flag model +
+      software-as-Flag + split-all-parts; `# Pol-1.3` → `POL-1.3`;
+      `CLIENTS` missing Vandelay; `env.example` LANGFUSE_BASE_URL;
+      leftover `gitignore.txt`, `sessions_2.md`, `main.py`; Jev API key
+
 ---
 
 # Appendix — Full file contents
