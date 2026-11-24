@@ -854,6 +854,92 @@ print(f"{len(json_back['reports'])} reports, {n_items} claims exported")
       `CLIENTS` missing Vandelay; `env.example` LANGFUSE_BASE_URL;
       leftover `gitignore.txt`, `sessions_2.md`, `main.py`; Jev API key
 
+### Session 9 — 2026-11-23 — 03: 10b (new), 7c, type hints, test suite
+
+**Done**
+- 10b (new): review-labeled claims by `review_reason` × rule decision.
+  Old diagnostic 10b/10c deleted (superseded by cell 10's
+  `same_purchase` logic + anchors)
+- 7c `check_missing_purpose` Flag (POL-5.3, "missing" half only):
+  `"missing_purpose"` added to `FlagCode`; tests go through
+  `model_validate` (None / "" / whitespace → flag; "Meeting" → None);
+  added to `ESCALATION_RULES`
+- Type hints: `type Rule[F] = Callable[[Claim, Policy], F | None]`;
+  `apply_rules[F](...) -> list[F]`; rule lists annotated
+  `list[Rule[Violation]]` / `list[Rule[Flag]]`
+- Bug fixed: cell 5 still held the old `Violation` version of
+  `check_software_vendor` (prohibited_category, POL-2.8) in
+  `SINGLE_CLAIM_RULES`; removed (6a's Flag version is the only one);
+  seam test added to cell 9
+- Test suite (ipytest): 11a fixtures (`policy`, `make_claim` factory),
+  11b 22 passed (single-claim deny rules), 11c 26 passed (flags,
+  cross-claim, `rule_decision`, pipeline seams) → 48 tests
+- 7c / 10b header strings changed back to `#` comments
+
+**Results**
+- 10b: 17 review labels = vague_purpose 12, near_cap 4, high_value 1.
+  Rules catch every near_cap and high_value; vague: 9 approved,
+  3 reviewed by unrelated flags (right decision, wrong reason)
+- missing_purpose fires 0 times (generator never leaves purpose blank)
+- Cell 6 prohibited_hint count: 26
+- Baseline unchanged: 237 / 62 / 31; 59 of 82 caught; 0 false
+  positives; false approvals 7.3% ($2,394.30)
+
+**Errors and fixes**
+- 7a `NameError: check_missing_purpose`: 3-item list pasted into 7a,
+  but the function is defined in 7c → define before use (instructions
+  were unclear: one heading over two blocks)
+- `parameterize` → `parametrize`: an unknown mark is silently ignored,
+  so parameters showed up as "fixture 'days' not found"
+- 20 vs 22 passed: `test_rental_class` missing → write down the
+  expected count before running
+- `UsageError: %%pytest` → `%%ipytest` (UsageError = check the magic line)
+- `StopIteration` in `make_claim`: typos `"meals"`, `"Office_Supplies"`
+  → helper now raises `ValueError` listing valid categories
+- Expected 48 for 11c, got 26: `ipytest.autoconfig()` clean mode runs
+  only the current cell's tests (26 was correct)
+
+**Decisions**
+- POL-5.3 split: missing → 03 Flag; vague → agent in 05. No
+  word-count rule: any threshold would be tuned on the labels
+- 06: count an escalation as caught only if the reason matches, not
+  just the decision
+- Tests hard-code policy numbers (an independent statement of the
+  policy); rules read them from YAML
+- Fixtures load from disk and use `name=` so they don't shadow
+  notebook globals
+
+**Learned**
+- PEP 695 generics: `type Alias[F] = ...`, `def f[F](...)`; hints are
+  for checkers and readers, not runtime
+- Rebinding a function name doesn't update lists holding the old
+  object → seam tests (`run_rules` on one crafted claim) catch wiring bugs
+- A docstring counts only as the first statement; other bare strings
+  are no-ops (ruff B018)
+- pytest: `parametrize`, named and factory fixtures, `scope="module"`,
+  `next(gen, None)` for clear errors
+- `None`-expected cases can pass by being skipped → pair each with an
+  over-the-line case built from the same claim
+
+**Open items**
+- [ ] **Next: item 3: move rules into `src/expense_agent/rules.py` +
+      `tests/test_rules.py` (approval per file); add `--strict-markers`
+      to pytest config; import `Policy` from `expense_agent.policy`;
+      then retire the bare-assert cells 3b–8c**
+- [ ] Save 03 (Cmd+S): the saved copy doesn't yet show the
+      `next(..., None)` fix in 11a; 7a docstring still says `POL-5..1`
+- [ ] `ruff check` + `ruff format` on notebooks/src/tests (trailing
+      spaces, brackets); pyproject `line-length = 79`
+- [ ] Reflect pending: what missing_purpose buys if it never fires;
+      a 4th `rule_decision` case; split resubmission as a notification
+      suggestion
+- [ ] Then the `validate.py` PEP 8 refactor (optional); decide 02 vs 04
+- [ ] Carried over: mentor skill updates (Flag model, software-as-Flag,
+      split-all-parts, POL-5.3 split, ipytest clean mode); `# Pol-1.3`
+      → `POL-1.3`; `CLIENTS` missing Vandelay; `env.example`
+      LANGFUSE_BASE_URL; leftover `gitignore.txt`, `sessions_2.md`,
+      `main.py`; Jev API key
+
 ---
 
 # Appendix — Full file contents
