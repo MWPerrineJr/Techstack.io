@@ -31,7 +31,7 @@ FlagCode = Literal[
 ]
 Decision = Literal["approve", "deny", "review"]
 
-POLICY_REF_PATTERN = r"POL-\d+\. \d+$"
+POLICY_REF_PATTERN = r"^POL-\d+\.\d+$"
 
 
 
