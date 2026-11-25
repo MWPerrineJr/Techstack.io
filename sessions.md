@@ -942,6 +942,102 @@ print(f"{len(json_back['reports'])} reports, {n_items} claims exported")
 
 ---
 
+### Session 10 — 2026-11-24/25 — Item 3: rules moved into the package
+
+**Done**
+- 11a: `make_claim` uses `next(gen, None)` + `ValueError` listing valid
+  categories (fix confirmed in saved 03)
+- `src/expense_agent/models.py` (new): `Claim`, shared `Finding` base
+  → `Violation` / `Flag`, `ViolationCode`, `FlagCode`, `Decision`,
+  `POLICY_REF_PATTERN`, `to_claims`
+- `src/expense_agent/rules.py` (new): every rule from 03 cells 3–9,
+  `apply_rules`, cross-claim checks, rule lists, `collect_findings`,
+  `rule_decision`, `run_rules` (+ `RESULT_COLUMNS`, `logging`)
+- `tests/conftest.py` (new): session-scoped `policy`, `claims`,
+  `make_claim`
+- `tests/test_models.py` (15) and `tests/test_rules.py` (56: the 48
+  from 11b/11c + 8 new) → full suite 90 passed
+- pyproject: `addopts = "--strict-markers"`; ruff lint select
+  E, W, F, I, N, D, UP, B; google docstrings; tests ignore D
+- Commits pushed: models, rules (562b905), tests (5371588);
+  lint config (ecbe966) committed, not yet pushed
+
+**Results**
+- Golden master: package `run_rules` == notebook `rule_results`
+  (`assert_frame_equal` on all 330 rows); 237 / 62 / 31 unchanged
+- `run_rules([])` → shape (0, 6), no crash
+- `ruff check src tests`: all checks passed under the new rules
+
+**Errors and fixes**
+- `test_models.py` saved in `src/expense_agent/` → moved to `tests/`
+- `{**claims[0].model_dump, ...}` → `model_dump()` ('method' object
+  is not a mapping)
+- `POLICY_REF_PATTERN` had a space and no `^`; a bad-ref case typed
+  as the valid `POL-2.2` passed only because the regex rejected
+  everything. Caught by the paired accept test
+- `purchase_caps`: unpacked into `key` instead of `rules` (undefined
+  name)
+- `mileage_rate`: `raise` indented inside the loop → every date after
+  Jun 30 raised (2026-10-05)
+- `FLAG_RULES` copy-pasted from `ESCALATION_RULES` → 24 claims
+  approve instead of review; escalation flags doubled
+- `check_high_value` detail `:.2f` → `:,.2f`
+- `git add` with one bad path aborts the whole add
+- zsh: inline `# comment` in a command is passed as an argument
+- Test file saved as `tests/rules.py` (not collected); editor tab kept
+  the old path after `mv` and re-created it on save
+- Missing comma in `parametrize` → `tuple indices must be integers`
+  (Python read it as indexing); ruff format ran on the broken code
+- test_rules.py: `{}` set instead of list (unhashable list),
+  `part2 = (...,)` tuple, merged vendor asserts, `"Office_Supplies"`,
+  `259.99` vs `249.99`, `.ge(0)` vs `.gt(0)` (could never fail)
+- `ruff check` "passed" before pyproject was edited (default rules
+  only); 6 E501 section-header comments fixed to 72 chars
+
+**Decisions**
+- `Policy` stays `dict[str, Any]` in `policy.py`; notebook copy retired
+- `check_prohibited_hint` compiles from its `policy` argument;
+  `PROHIBITED_PATTERNS` global removed (`re` caches compiled patterns)
+- Rule lists sit after all rule functions; one definition per name
+- `len(claims) < 2` guards in duplicate/split checks
+- Fixtures in `conftest.py`; helpers (`code_of`, `MakeClaim`) stay in
+  the test file (don't import from conftest)
+- Local `policy`/`claims` fixtures in test_policy/test_models left in
+  place for now (override conftest; cleanup commit later)
+- Notebook 03 committed separately in step 5
+
+**Learned**
+- Golden-master / characterization test: compare new code to a
+  known-good version; it caught 4 bugs ruff and type hints could not
+- Fixture scopes (session > module > function); deep-copy a shared
+  mutable fixture before changing it; `frozen=True` makes sharing safe
+- pytest collects only `test_*.py`; `--fixtures` shows where each
+  fixture comes from
+- `next(gen, default)`; nested comprehension reads like nested loops
+- `logger.info("%d", n)` defers formatting; f-string doesn't
+- Write the expected count down before running; chase any mismatch
+- A test that can't fail (`>= 0`) is worse than no test
+
+**Open items**
+- [ ] **Next: item 3, step 5: notebook 03 imports `Claim`/`Violation`/
+      `Flag`/rules from `expense_agent`; retire cells 3b–8c; re-run
+      9–10 (expect 237 / 62 / 31; 59 of 82; 0 FP); commit 03**
+- [ ] `git push` (ecbe966)
+- [ ] Cleanup commit: drop duplicate fixtures in test_policy /
+      test_models; "venerated" → "validated"; test_rules docstring
+      `expense_agent` → `expense_agent.rules`
+- [ ] Optional: VS Code `"editor.rulers": [72, 79]`
+- [ ] Reflect pending: skip_ids in check_splits (decision vs audit
+      trail); golden master vs correctness checks
+- [ ] Then the `validate.py` PEP 8 refactor (optional); decide 02 vs 04
+- [ ] Carried over: mentor skill updates (Flag model, software-as-Flag,
+      split-all-parts, POL-5.3 split, ipytest clean mode, package
+      layout models/rules + conftest); `CLIENTS` missing Vandelay;
+      `env.example` LANGFUSE_BASE_URL; leftover `gitignore.txt`,
+      `sessions_2.md`, `main.py`; Jev API key
+
+---
+
 # Appendix — Full file contents
 Every file created in Session 1, so this document can rebuild the project on its own.
 
