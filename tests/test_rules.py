@@ -184,7 +184,7 @@ def test_mileage_rate_outside_bands_raises(policy: Policy) -> None:
         mileage_rate(date(1999, 1, 1), policy)
 
 
-# --- Review flags (POL-2.8, 3.x) -----------------------------------------------------
+# --- Review flags (POL-2.8, 3.x) ---------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -234,7 +234,7 @@ def test_software_vendor(
     assert code_of(check_software_vendor(claim, policy)) == expected
 
 
-# --- Escalation flags (POL-5.1 - 5.3) ---------------------------------------------------------------------
+# --- Escalation flags (POL-5.1 - 5.3) ----------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -290,7 +290,7 @@ def test_missing_purpose(
     assert code_of(check_missing_purpose(claim, policy)) == expected
 
 
-# --- Cross-claim deny rules (POL-1.4, 1.5) ---------------------------------------------------------------------
+# --- Cross-claim deny rules (POL-1.4, 1.5) -----------------------------
 
 
 def test_duplicate_is_the_later_submission(make_claim: MakeClaim) -> None:
@@ -332,7 +332,7 @@ def test_splits(
     assert sorted(v.claim_id for v in found) == expected_ids
 
 
-# --- Decision and pipeline (POL-5) ------------------------------------------------------------------------------------
+# --- Decision and pipeline (POL-5) -------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -378,7 +378,7 @@ def test_run_rules_empty_input(policy: Policy) -> None:
     assert list(results.columns) == RESULT_COLUMNS
 
 
-# --- Golden master: the generated dataset --------------------------------------------------
+# --- Golden master: the generated dataset ------------------------------------
 
 
 def test_baseline_on_generated_data(

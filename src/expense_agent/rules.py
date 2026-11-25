@@ -298,7 +298,7 @@ def check_missing_purpose(claim: Claim, policy: Policy) -> Flag | None:
     )
 
 
-# --- Cross-claim deny rules (POL-1.4, POL-1.5)----------------------------------
+# --- Cross-claim deny rules (POL-1.4, POL-1.5)-------------------------------
 
 
 def claims_frame(claims: list[Claim]) -> pd.DataFrame:

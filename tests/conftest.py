@@ -18,7 +18,7 @@ from expense_agent.policy import Policy, load_policy
 @pytest.fixture(name="policy", scope="session")
 def policy_fixture() -> Policy:
     """Load the real policy once per test run.
-    
+
     Every test shares this dict: deep-copy it before changing it.
     """
     return load_policy(POLICY_PATH)
@@ -34,7 +34,6 @@ def claims_fixture() -> list[Claim]:
 def make_claim_fixture(claims: list[Claim]) -> Callable[..., Claim]:
     """Factory: a real claim of a category, re-validated with changes."""
     categories = sorted({c.category for c in claims})
-
 
     def make_claim(category: str, **changes: Any) -> Claim:
         base = next((c for c in claims if c.category == category), None)

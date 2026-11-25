@@ -17,10 +17,7 @@ from expense_agent.models import (
 from expense_agent.paths import GENERATED_DIR, POLICY_PATH
 from expense_agent.policy import load_policy
 
-
-
 EXPECTED_CLAIMS = 330
-
 
 
 @pytest.fixture(name="claims", scope="module")
@@ -43,17 +40,17 @@ def test_violation_codes_match_policy() -> None:
 def test_blank_purpose_becomes_none(
     claims: list[Claim], blank: object
 ) -> None:
-    claim = Claim.model_validate({**claims[0].model_dump(), 
-                                  "business_purpose": blank})
+    claim = Claim.model_validate(
+        {**claims[0].model_dump(), "business_purpose": blank}
+    )
     assert claim.business_purpose is None
 
 
-
 def test_purpose_is_stripped(claims: list[Claim]) -> None:
-    claim = Claim.model_validate({**claims[0].model_dump(),
-                                  "business_purpose": "  Client dinner "})
+    claim = Claim.model_validate(
+        {**claims[0].model_dump(), "business_purpose": "  Client dinner "}
+    )
     assert claim.business_purpose == "Client dinner"
-
 
 
 @pytest.mark.parametrize("ref", ["Pol-2.2", "POL-2", "2.2", "POL-2.2 "])
@@ -63,9 +60,10 @@ def test_bad_policy_ref_rejected(ref: str) -> None:
 
 
 def test_good_policy_ref_accepted() -> None:
-    violation = Violation(claim_id="X", code="over_cap", policy_ref="POL-2.2", detail="t")
+    violation = Violation(
+        claim_id="X", code="over_cap", policy_ref="POL-2.2", detail="t"
+    )
     assert violation.policy_ref == "POL-2.2"
-
 
 
 def test_flag_rejects_violation_code() -> None:
@@ -73,8 +71,6 @@ def test_flag_rejects_violation_code() -> None:
         Flag(claim_id="X", code="over_cap", policy_ref="POL-5.1", detail="t")
 
 
-
 def test_claim_is_frozen(claims: list[Claim]) -> None:
     with pytest.raises(ValidationError):
         claims[0].amount = 1.0
-

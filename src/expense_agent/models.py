@@ -11,7 +11,6 @@ from typing import Literal
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-
 ViolationCode = Literal[
     "over_cap",
     "prohibited_category",
@@ -34,7 +33,6 @@ Decision = Literal["approve", "deny", "review"]
 POLICY_REF_PATTERN = r"^POL-\d+\.\d+$"
 
 
-
 class Claim(BaseModel):
     """One submitted expense line item. Carries no labels."""
 
@@ -49,9 +47,9 @@ class Claim(BaseModel):
     category: str
     merchant: str
     description: str
-    business_purpose: str |None = None
+    business_purpose: str | None = None
     amount: float = Field(gt=0)
-    city: str |None = None
+    city: str | None = None
     nights: int | None = Field(default=None, ge=0)
     attendees: int | None = Field(default=None, ge=0)
     fare_class: str | None = None
@@ -74,6 +72,7 @@ class Claim(BaseModel):
 
 class Finding(BaseModel):
     """Fields every rule finding shares: which claim,rule and why."""
+
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     claim_id: str
@@ -96,6 +95,3 @@ class Flag(Finding):
 def to_claims(df: pd.DataFrame) -> list[Claim]:
     """Validate every row into a Claim; fail loudly on a bad row."""
     return [Claim.model_validate(row) for row in df.to_dict("records")]
-
-
-            
