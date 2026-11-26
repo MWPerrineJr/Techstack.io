@@ -1038,6 +1038,69 @@ print(f"{len(json_back['reports'])} reports, {n_items} claims exported")
 
 ---
 
+### Session 11 — 2026-11-26 — Item 3 step 5: notebook 03 uses the package
+
+**Done**
+- 03 cell 1b: imports `to_claims` + `run_rules`, `rule_decision`,
+  `collect_findings` from `expense_agent`; check asserts
+  `__module__ == "expense_agent.rules"`
+- Retired 3b–8c (rule defs + bare asserts), models cell (Claim,
+  Violation, ViolationCode, to_claims, blank_to_none), cell 3
+  (Policy, Rule, check_late, check_receipt), 11a–11c (ipytest →
+  tests/); markdown notes left in their place
+- Cell 9 reduced to `run_rules(claims, policy)` + asserts + seam test
+- Cell 2 rebuilt: `claims = to_claims(claims_df)` + 330 / unique checks
+- Cell 10: `zip(..., strict=True)` (B905)
+- ruff check 03: all checks passed; ruff --fix also fixed 01
+  docstrings (D205, D411)
+- Commits: 3e2c79d (03), 6ec9613 (01), pushed
+
+**Results**
+- uv run pytest: 90 passed
+- 237 / 62 / 31; 59 of 82; 0 FP; false approvals 7.3% ($2,394.30);
+  first run where `claims` are package `Claim` objects
+
+**Errors and fixes**
+- 1b check printed 3× → print was inside the for loop
+- NameError apply_rules in cell 9: notebook's own run_rules /
+  collect_findings shadowed the import → kept only the call
+- 11b NameError check_cap etc. → retired 11a–11c (tests/ covers them)
+- ruff F811: Claim / Violation / to_claims / Policy still defined in
+  notebook → models cell + cell 3 deleted
+- `claims` undefined after deleting models cell → recovered line via
+  `git show HEAD:notebooks/03_policy_rules.ipynb | grep`
+- `ruff --fix` → `ruff check --fix`; ran on `.` and touched 01 too
+- Committed before confirming numbers (confirmed after: identical)
+
+**Decisions**
+- Keep cell numbers; gaps + markdown notes record where code moved
+- Notebook 03 is now a demonstration/scoring notebook; code lives in
+  src/, tests in tests/
+- Two commits: one change per commit
+
+**Learned**
+- Static analysis (F811) beats runtime spot checks for shadowing
+- grep for `def|class` misses type aliases (`X = Literal[...]`)
+- Closing bracket aligns with the line that opened it
+- `git show HEAD:<file>`, `git diff --stat`, pager `q`
+- Edit mode vs command mode; D D, Esc Z, A / B / M / Y
+
+**Open items**
+- [ ] **Next: decide 02 (receipts) vs 04 (anomaly model)**
+- [ ] Check `grep -n "violation_codes" tests/*.py`; if missing, add
+      ViolationCode ↔ policy.yaml drift test to test_models.py
+- [ ] Cleanup commit: "no receipt" → ", no receipt" (rules.py +
+      test); duplicate fixtures in test_policy / test_models;
+      "venerated" → "validated"; test_rules docstring
+- [ ] E501 × 13 in notebooks 01 / 01b (split long f-strings)
+- [ ] Delete leftovers: main.py, gitignore.txt, sessions_2.md
+- [ ] Reflect pending: what notebook 03 is for now; check placement
+      (1b check vs cell 9)
+- [ ] Carried over: mentor skill updates; CLIENTS missing Vandelay;
+      env.example LANGFUSE_BASE_URL; Jev API key
+
+---
+
 # Appendix — Full file contents
 Every file created in Session 1, so this document can rebuild the project on its own.
 
