@@ -1101,6 +1101,108 @@ print(f"{len(json_back['reports'])} reports, {n_items} claims exported")
 
 ---
 
+### Session 11 (cont.) — 2026-11-26 — Notebook 04 started (cells 0–3)
+
+**Done**
+- Created `notebooks/04_anomaly_model.ipynb`
+- Cell 0: imports; constants `SEED = 42`, `DATE_COLUMNS`,
+  `MIN_GROUP_SIZE = 3`, `N_ESTIMATORS = 200`, `REVIEW_SHARE = 0.10`;
+  `load_claims` only (no labels), dates parsed with `pd.to_datetime`;
+  asserts: 330 rows, unique claim_id, no label columns
+- 1a date features: `days_to_submit`, `is_weekend`
+- 1b amount features: `log_amount` (log1p), `amount_vs_cat_median`,
+  `amount_z_in_cat` (std 0 → NaN → z 0); self-check: median ratio
+  per category == 1.0
+- 1c employee features: `claims_in_month` (employee × expense month),
+  `amount_vs_emp_median` (fallback 1.0 when < MIN_GROUP_SIZE claims)
+- 1d `FEATURE_COLUMNS` (7 features) → `X`; correlation table
+- 2 `IsolationForest(n_estimators=200, contamination="auto",
+  random_state=SEED)`; `anomaly_score = -score_samples(X)`;
+  rerun-with-same-seed determinism check
+- 3 threshold = 90th percentile (`REVIEW_SHARE`); `scored_claims`;
+  top 10 inspected
+
+**Results**
+- `is_weekend` mean 0.14 (expected 0.29 under uniform days: generator
+  favors weekdays); `days_to_submit` median 16, max 120
+- `amount_vs_cat_median` max 10.64; `amount_z_in_cat` right-skewed
+  (median −0.23, max 4.32)
+- Personal baseline missing for 12% of claims; `claims_in_month`
+  median 8 (~33 claims per employee)
+- Correlation: amount cluster 0.77–0.93 (cat median / z / emp median);
+  `claims_in_month` vs `days_to_submit` −0.25, vs `is_weekend` −0.24
+- Scores 0.348–0.737, median 0.405; threshold 0.537 → 33 flagged
+- Top 10: 5 big Airfare, Home Office $1,196 (R-E001-05-L2), Meals
+  $179, R-E001-07-L3 (premium class) + 3 very late filings (96, 113,
+  120 days). Model mostly rediscovers what the rules catch
+
+**Errors and fixes**
+- `from expense_agent.data import GENERATED_DIR` → `expense_agent.paths`
+  (paths = locations, data = loaders)
+
+**Decisions**
+- Features in their own DataFrame; labels only from cell 4 on
+- `contamination="auto"`: 0.25 would leak the label rate
+- Threshold from review capacity (top 10%), not a magic score
+- No scaling: tree splits are scale-invariant
+- Keep all 7 features as baseline; test dropping one (ablation) in 4
+- Anomaly score = input to review, never an auto-deny ("rare" ≠
+  "against policy")
+- Project/product name: considering "ClaimGuard" (not decided;
+  package stays `expense_agent`)
+
+**Learned**
+- Null-model expectations: write a guess, investigate the gap
+- `groupby().transform()` (one value per row) vs `.agg()` (per group)
+- `.where(cond, other)`; mean of booleans = share True;
+  `.dt.to_period("M")`
+- Masking: outliers inflate mean/std and hide themselves → median/MAD
+  are robust
+- IsolationForest: short path length = anomaly; `score_samples` is
+  higher = more normal, so negate
+- Recall ceiling = flags / positives (33 / 82 = 40%)
+
+**Open items**
+- [ ] **Next: 04 cell 4a — evaluate vs labels.** Add `load_labels` to
+      cell 0 imports, then:
+      ```python
+      # 4a Evaluate against the answer key (labels enter here, never earlier)
+      LABEL_COLUMNS = ["claim_id", "in_policy", "violation_type"]
+
+      evaluated = scored_claims.merge(
+          load_labels(GENERATED_DIR)[LABEL_COLUMNS],
+          on="claim_id",
+          validate="one_to_one",
+      )
+      out_of_policy = ~evaluated["in_policy"]
+      flagged = evaluated["is_anomaly"]
+
+      base_rate = out_of_policy.mean()
+      precision = out_of_policy[flagged].mean()
+      recall = flagged[out_of_policy].mean()
+      max_recall = flagged.sum() / out_of_policy.sum()
+
+      assert len(evaluated) == len(scored_claims) == 330
+      print(f"base rate (random flagging): {base_rate:.1%}")
+      print(f"precision: {precision:.1%}  (lift {precision / base_rate:.1f}x)")
+      print(f"recall: {recall:.1%}  (ceiling at this capacity: {max_recall:.1%})")
+      ```
+      Expected: base rate 24.8%; precision ~55–75%; recall ~20–30%
+- [ ] Then 4b: recall by violation type; of the 23 claims rules miss
+      or only review (6 personal_extension, 17 prohibited_category),
+      how many does the model flag? 4c: ablation (drop one amount
+      feature). 5: MLflow run
+- [ ] Open question: why `claims_in_month` correlates negatively with
+      lateness and weekend
+- [ ] Reflect pending: 200 vs 100 trees (vary only the seed);
+      MIN_GROUP_SIZE 1 vs 10; which violation types the model will
+      miss (duplicate = copy of a normal claim)
+- [ ] Commit notebook 04 (and 03 re-run outputs)
+- [ ] Still open from Session 11: drift-test grep, cleanup commit,
+      E501 × 13, leftover files, carried-over items
+
+---
+
 # Appendix — Full file contents
 Every file created in Session 1, so this document can rebuild the project on its own.
 
