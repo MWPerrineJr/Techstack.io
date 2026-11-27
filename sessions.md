@@ -1203,6 +1203,58 @@ print(f"{len(json_back['reports'])} reports, {n_items} claims exported")
 
 ---
 
+### Session 12 — 2026-11-27 — 04 cells 4a–4g (evaluation, ablation, rules overlap)
+
+**Done**
+- 4a evaluate vs labels; 4b-1 recall by type; 4b-2 overlap with rules;
+  4b-3 false alarms vs rule decisions
+- 4c ablation harness `score_feature_set` (baseline row must reproduce 4a)
+- 4d seed check (20 seeds × 3 feature sets)
+- 4e rank only rule-approved claims; catch curve at budgets 5/10/20/33
+- 4f ranks of the 6 false approvals; 4g "weekend lodging" rule check
+
+**Results**
+- 4a: base rate 24.8%; precision 72.7% (2.9x lift); recall 29.3% (ceiling 40.2%)
+- 4b: premium_class 6/6, late 10/11, over_cap 6/16; missing_receipt,
+  personal_extension, split 0. Model adds 1 catch rules miss; 8 of 9
+  false alarms are rule-approved (Ground Transport ~$370, cheap Software)
+- 4c/4d: cat_median and emp_median redundant (identical rows); drop
+  log_amount = noise (23.4 vs 23.5 ± 0.8); "no amount" 4 new catches
+  on all 20 seeds; seed noise ≈ ±0.8 claims
+- 4e: 237 approved, 6 bad (2.5%). No-amount catches 4/6 at budget 10
+  (16x random); baseline 0/6 at 10
+- 4f: all 6 = personal_extension, Lodging, weekend, normal amounts
+- 4g: weekend-lodging rule flags 6 approved, catches 6/6 → generator
+  artifact (no legitimate weekend lodging exists)
+
+**Errors and fixes**
+- 4d capacity assert: tied scores flagged > 33 ("no amount": 172 of 330
+  claims share a feature row) → top-k by `argsort(kind="stable")`
+- KeyError 'grue_flags' → typo in METRICS
+
+**Decisions**
+- Evaluate the model where it runs: on rule-approved claims, not standalone
+- Capacity limits enforced by count, not by score cutoff
+
+**Learned**
+- Standalone best ≠ best alongside rules
+- Ablation on the answer key = test-set selection; use for insight only
+- Ties: quantile threshold ≠ top-k when scores repeat
+- Boolean mask on index array: `order[approved[order]]`; inverse rank
+- A too-perfect result is a data-generation check
+
+**Open items**
+- [ ] **Decide: fix generator (legit weekend lodging) vs weekend-lodging
+      review rule vs both**
+- [ ] Decide feature set: keep 7 or drop log_amount + one median ratio
+- [ ] Seed check on the 4e catch curve
+- [ ] 5: MLflow run
+- [ ] Commit notebook 04 (+ 03 re-run outputs)
+- [ ] Still open from Session 11: drift-test grep, cleanup commit,
+      E501 × 13, leftover files, carried-over items
+
+---
+
 # Appendix — Full file contents
 Every file created in Session 1, so this document can rebuild the project on its own.
 
