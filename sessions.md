@@ -1235,6 +1235,7 @@ print(f"{len(json_back['reports'])} reports, {n_items} claims exported")
 **Decisions**
 - Evaluate the model where it runs: on rule-approved claims, not standalone
 - Capacity limits enforced by count, not by score cutoff
+- Ruff line-length 85 (was 79) (deba5d0)
 
 **Learned**
 - Standalone best ≠ best alongside rules
@@ -1250,8 +1251,9 @@ print(f"{len(json_back['reports'])} reports, {n_items} claims exported")
 - [ ] Seed check on the 4e catch curve
 - [ ] 5: MLflow run
 - [ ] Commit notebook 04 (+ 03 re-run outputs)
+- [x] E501 cleared at line-length 85 (c05e0b7); main.py removed (5093590)
 - [ ] Still open from Session 11: drift-test grep, cleanup commit,
-      E501 × 13, leftover files, carried-over items
+      leftover files (gitignore.txt, sessions_2.md), carried-over items
 
 ---
 
