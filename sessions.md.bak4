@@ -1,0 +1,2575 @@
+`# Techstack.io Expense Reporter & Approval Tool — Session Log
+
+Project folder (local): `~/Techstack.io`
+Owner: Michael Perrine
+
+---
+
+## Session 1 — 2026-11-13
+
+### Status
+- Planning complete. All decisions made (see below).
+- Project folder created (empty).
+- **Not started yet.** Next action: Step 0 (project setup), then Step 1 (data generation + policy files).
+
+### Project goal
+An enterprise expense reporter and approval tool for the sample business **Techstack.io**:
+- Synthetic expense data: 10 employees × 10 reports = 100 reports, 1–5 line items each (~300 claims)
+- A standard expense policy (approved / denied / escalate)
+- 25% of claims randomly out of policy (fixed seed; ground-truth labels kept)
+- Built and tested in notebooks first, then shipped as an app that imports and processes expense reports
+- Agentic AI review with human-in-the-loop (HITL) for questionable claims
+
+### Decisions
+| Topic | Decision |
+|---|---|
+| Language / harness | Python, LangChain + LangGraph |
+| Primary reviewer model | OpenAI |
+| Checker / verifier model | Anthropic. Re-checks every automatic approve/deny; a disagreement routes the claim to a human |
+| Typed review | Jev (TypeSafe AI). Typed classification questions per claim, plus eval scoring; `jevals` library for gates. Project-specific API key to be created |
+| Observability | Langfuse Cloud to start; self-hosted Langfuse in Docker later as a learning exercise |
+| Data granularity | Line-item level; 25% of claims out of policy |
+| Import formats | CSV, Excel, JSON (all three) |
+| Additions | All of A–F approved (see below) |
+| Learning mode | Michael writes all notebook code himself with detailed, cell-by-cell guidance. The app is built after the notebooks are complete |
+| Working protocol | Human approval before any file is created or changed. For now, Michael saves files manually |
+
+### Approved additions (A–F)
+- **A. Synthetic receipts + OCR.** Generate receipt PDFs/images (some deliberately mismatched); a vision model extracts fields; a rule compares them to the claim.
+- **B. Anomaly detection.** IsolationForest on per-employee spend features; the anomaly score feeds routing.
+- **C. MLflow.** Track prompt versions, models, thresholds and eval metrics across runs.
+- **D. Two-tier approval.** Manager review first, then Finance for items over $1,000 or manager overrides of the AI.
+- **E. Docker.** Containerize the app (docker-compose); later, self-host Langfuse.
+- **F. Notification drafts.** Agent drafts denial/return explanations citing policy. Stored only, never sent.
+
+### Architecture
+```
+Upload (CSV / XLSX / JSON)
+  → Ingest & validate (Pydantic)
+  → Receipt OCR + match check (A)
+  → Rules engine (hard policy checks → violation codes)
+  → Anomaly score (B)
+  → Jev typed checks (purpose specific? business vs personal? merchant matches category?)
+  → OpenAI primary reviewer (decision, rationale, confidence, policy citation)
+  → Anthropic checker (verifies auto decisions)
+  → Router
+       ├─ clean + confident + checker agrees → AUTO-APPROVE
+       ├─ clear violation + checker agrees   → AUTO-DENY
+       └─ ambiguous / low confidence / disagreement / >$1,000 → HUMAN REVIEW
+             → Manager → Finance (D)
+  → Notification draft (F)
+  → Final decision + audit log (Langfuse traces, SQLite)
+```
+Principle: deterministic rules first (cheap, auditable); LLMs only for judgment calls.
+
+### Synthetic data spec
+- 10 employees across Engineering, Sales, Marketing, Finance, Ops (role, cost center, manager, home city)
+- 10 reports each over a 6-month window; spending patterns vary by role
+- 25% of claims out of policy, weighted across these violation types:
+  over cap, prohibited category, missing receipt, late submission (>60 days), duplicate,
+  split transaction, personal/weekend extension, unapproved premium class
+- About 5% deliberately borderline claims to exercise HITL
+- Hidden labels: `expected_decision`, `violation_type`
+
+### Draft policy v1 (not yet saved as files)
+**Approved (within limits)**
+- Airfare: economy; business class only on flights over 6 hours, with pre-approval
+- Lodging: $250/night standard, $350/night high-cost cities
+- Meals: $75/day per diem when traveling; client meals $100/person with attendees and purpose
+- Ground transport: rideshare, taxi, economy/mid-size rental, parking, tolls; mileage at current IRS rate (config value)
+- Conferences/training: up to $2,000 per event, with pre-approval
+- Software: pre-approved vendor list only
+- Home office: $500/year
+
+**Denied**
+- Alcohol (unless part of client entertainment)
+- Personal items, gift cards
+- Fines
+- Family travel
+- Spa, gym, in-room entertainment
+- Duplicates
+- Submitted more than 60 days late
+- Over $75 without a receipt
+
+**Escalate to human**
+- Single item over $1,000
+- Within 10% of a cap
+- Agent confidence < 0.75
+- Vague purpose
+- Merchant/category mismatch
+- Primary and checker models disagree
+
+Policy will be stored as `docs/expense_policy.md` (for agents to cite) and `config/policy.yaml` (for the rules engine).
+
+### Build sequence
+| # | Notebook | Covers |
+|---|---|---|
+| 00 | `00_setup.ipynb` | Environment, keys, Langfuse + model smoke test |
+| 01 | `01_generate_data.ipynb` | Employees, reports, claims, labels |
+| 02 | `02_generate_receipts.ipynb` | A: receipt PDFs/images |
+| 03 | `03_policy_rules.ipynb` | YAML policy + rules engine |
+| 04 | `04_anomaly_model.ipynb` | B: IsolationForest; C: MLflow |
+| 05 | `05_agent_graph.ipynb` | LangGraph, Jev → OpenAI → Anthropic, HITL two-tier (D), notifications (F), Langfuse |
+| 06 | `06_evaluation.ipynb` | Confusion matrix, false-approval rate, HITL rate, cost/latency; Langfuse datasets + MLflow |
+| — | App | Streamlit: import, reviewer queues (manager/finance), dashboard, audit log |
+| — | Docker (E) | Containerize app; then self-hosted Langfuse |
+
+Key metric: **false approvals** (money leaking out), not plain accuracy.
+
+---
+
+## Step 0 — Project setup (to run)
+
+### 1. Initialize
+```bash
+cd ~/Techstack.io
+uv init --python 3.12 --name techstack-expense
+mkdir -p notebooks data/raw data/receipts config docs src/expense_agent tests
+```
+
+### 2. Dependencies
+```bash
+# Core harness + models
+uv add langchain langgraph langchain-openai langchain-anthropic
+# Observability + typed review
+uv add langfuse jevals
+# Data + config
+uv add pandas numpy faker pydantic pyyaml python-dotenv openpyxl
+# Receipts (A) + ML (B, C)
+uv add reportlab pillow scikit-learn mlflow
+# App
+uv add streamlit
+# Notebook + testing (dev-only)
+uv add --dev ipykernel ipytest pytest
+```
+
+### 3. `.env` (project root; never commit)
+Template saved separately as `env.example`. Copy it to `.env` and fill in the values.
+Langfuse US region host: `https://us.cloud.langfuse.com`. Confirm the correct host in your Langfuse project settings.
+
+### 4. `.gitignore`
+Template saved separately as `gitignore.txt`. Rename it to `.gitignore`.
+
+### 5. `notebooks/00_setup.ipynb`. Select the `.venv` kernel, then run:
+
+```python
+# Cell 1 — load secrets and confirm nothing is missing
+import os
+from dotenv import load_dotenv
+
+load_dotenv("../.env")
+
+required = [
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "TYPESAFE_API_KEY",
+    "LANGFUSE_PUBLIC_KEY",
+    "LANGFUSE_SECRET_KEY",
+    "OPENAI_MODEL",
+    "ANTHROPIC_MODEL",
+]
+missing = [k for k in required if not os.getenv(k)]
+print("Missing:", missing or "none ✅")
+```
+
+```python
+# Cell 2 — Langfuse auth check
+from langfuse import get_client
+
+langfuse = get_client()
+print("Langfuse auth:", langfuse.auth_check())
+```
+
+```python
+# Cell 3 — call both models through LangChain, traced in Langfuse
+from langchain_openai import ChatOpenAI
+from langchain_anthropic import ChatAnthropic
+from langfuse.langchain import CallbackHandler
+
+handler = CallbackHandler()
+primary = ChatOpenAI(model=os.getenv("OPENAI_MODEL"), temperature=0)
+checker = ChatAnthropic(model=os.getenv("ANTHROPIC_MODEL"), temperature=0)
+
+for name, llm in [("primary", primary), ("checker", checker)]:
+    reply = llm.invoke(
+        "Reply with exactly: OK", config={"callbacks": [handler]}
+    )
+    print(name, "→", reply.content)
+
+langfuse.flush()
+```
+
+**Done when:**
+- No keys are missing
+- Langfuse auth prints `True`
+- Both models reply `OK`
+- Two traces appear in Langfuse
+
+The Jev connection is tested at the start of notebook 05.
+
+---
+
+## Policy + reference dataset (delivered 2026-11-13, saved manually)
+
+| File | Save to | Purpose |
+|---|---|---|
+| `expense_policy.md` | `docs/` | Readable policy v1.0 with section IDs (POL-1.x …) that agents cite |
+| `policy.yaml` | `config/` | Machine-readable limits; the single source of truth for numbers |
+| `employees.csv` | `data/raw/` | 10 employees: title, department, home city, manager |
+| `expense_reports.csv` / `.xlsx` / `.json` | `data/raw/` | Import files, **no labels**. CSV/XLSX are flat (one row per claim); JSON is nested reports → line_items |
+| `ground_truth_labels.csv` | `data/raw/` | Answer key; join on `claim_id`. Never shown to the agent |
+
+**Policy changes vs. the first draft:**
+- Mileage now uses the actual 2026 IRS business rates: $0.725/mile Jan 1–Jun 30 and $0.76/mile from Jul 1 (a mid-year IRS revision). The rate depends on the expense date, which is a good test for the rules engine.
+- Office supplies capped at $150 per purchase.
+- Home office cap is $500 per purchase (no annual cap).
+- Prohibited items have codes (ALCOHOL_NO_CLIENT, PERSONAL_ITEM, …).
+
+**Dataset stats (seed 42):**
+- 100 reports (10 per employee), **328 claims**
+- **82 out of policy = 25.0%**
+- Expected decisions: 228 approve / 82 deny / 18 review
+
+| Violation type | Count |
+|---|---|
+| over_cap | 20 |
+| prohibited_category | 20 |
+| late_submission | 12 |
+| missing_receipt | 12 |
+| duplicate | 6 |
+| personal_extension | 5 |
+| premium_class | 5 |
+| split_transaction | 2 |
+
+- Review reasons: vague_purpose 12, near_cap 4 (16 borderline = 5%), high_value 2.
+- Clean claims are generated below 90% of every cap, so they never trigger the near-cap rule by accident.
+
+**Validation results:**
+- 0 in-policy claims break a hard rule.
+- All 6 duplicates are detectable by (employee, date, merchant, amount). A duplicate always copies an *earlier* line.
+- Simple hard rules catch **51 of 82** violations. The other 31 need judgment: prohibited items hidden in descriptions (18), duplicates (6, need a cross-claim check), personal extensions (5), split purchases (2). **That gap is exactly why the agent exists.** Track it in notebook 06.
+
+**Data dictionary (import files):**
+- `report_id`, `claim_id` (`R-E001-01-L2` = employee E001, report 01, line 2), `line_no`
+- `employee_id`, `employee_name`, `department`, `manager_id`, `report_title`, `submitted_date` (report-level)
+- `expense_date`, `category`, `merchant`, `description`, `business_purpose`, `amount`, `currency`, `city`
+- `nights` (lodging), `attendees` + `attendee_names` (client meals), `fare_class` + `flight_hours` (airfare), `rental_class`, `miles`
+- `preapproved`, `receipt_attached` (booleans)
+
+**Labels:** `in_policy`, `violation_type`, `expected_decision` (approve/deny/review), `review_reason`, `is_borderline`, `label_note` (human-readable explanation)
+
+## Open items / next session
+- [ ] Save the policy + data files into the project folders listed above
+- [ ] Create project-specific TypeSafe (Jev) API key
+- [ ] Run Step 0 and record any errors here
+- [ ] Reply "go ahead" to begin `01_generate_data.ipynb`: Michael rebuilds the generator cell by cell and compares the output to this reference dataset (same 25% rate, label schema and validation checks)
+
+## Session notes
+_Add notes, errors and decisions from each working session below._
+
+### Session 2 — 2026-11-14 — Step 0 complete
+**Done**
+- Project initialized with uv; pinned Python 3.12.12 (`.python-version` 3.12, `requires-python >=3.12`), name `techstack-expense`
+- Policy + data files moved to `docs/`, `config/`, `data/raw/`
+- Dependencies added; dev tools (ipykernel, ipytest, pytest, ruff, nbqa) in `dev` group only
+- `.gitignore` merged (adds .env, .ipynb_checkpoints/, mlruns/, mlflow.db, data/receipts/, .DS_Store); `.env` verified untracked
+- `notebooks/00_setup.ipynb` passes: keys present, Langfuse auth True, both models reply OK, 2 traces visible; `ruff check` + `ruff format` clean
+
+**Errors and fixes**
+- `uv init` had defaulted to Python 3.13 → edited `requires-python` first, then `uv python pin 3.12`, rebuilt `.venv`
+- Langfuse 401 → SDK v5 uses `LANGFUSE_BASE_URL` (not `LANGFUSE_HOST`); account is EU (`https://cloud.langfuse.com`); fixed by generating a new key pair. `.env` edits need a kernel restart.
+- `nbqa ruff format` fails (nbqa reads `format` as a path) → use ruff directly: `uv run ruff check notebooks` and `uv run ruff format --diff notebooks`
+
+**Decisions**
+- Models: primary `gpt-6-luna`, checker `claude-sonnet-5-5`
+- GPT-6 Luna rejects temperature=0 (uses 1); Sonnet 5.5 has no temperature parameter → measure run-to-run consistency in notebook 06; rely on structured output in 05
+- Run all `uv` commands in Mac Terminal only (a Linux shell would break `.venv`)
+
+**Open items**
+- [x] ruff check + ruff format clean
+- [ ] Rename `LANGFUSE_HOST` → `LANGFUSE_BASE_URL` in `env.example`
+- [ ] Optional: `uv remove --dev nbqa` (ruff handles notebooks natively)
+- [ ] Decide on leftover `gitignore.txt`, `sessions_2.md`, `main.py`
+- [ ] Next: `01_generate_data.ipynb`, cell 1 (imports, constants, seeded RNG, load policy.yaml)
+
+### Session 2 (cont.) — 2026-11-14 — Notebook 01 started
+**Done**
+- `notebooks/01_generate_data.ipynb` created; title + purpose markdown cells
+- Cell 1 complete: imports, constants (SEED, OUT_OF_POLICY_RATE, BORDERLINE_RATE, WINDOW_START/END, TODAY), `rng = random.Random(SEED)`, `load_policy()` with type hints + docstring + FileNotFoundError, `POLICY`, `CATEGORIES`, `HIGH_COST_CITIES` (set). Asserts pass.
+- ruff check: only expected F401 (`timedelta`, `pd` — used in cells 2–3)
+
+**Learned**
+- Lambda assigned to a name violates PEP 8 (E731) → use `def`
+- One seeded `random.Random` instance, never the global `random.seed`
+- Fixed `TODAY` in the generator keeps data, labels and metrics reproducible; the live app uses an injected `as_of` date (default `date.today()`) and logs it with each decision for audit. Policy rules use dates stored on the claim, so they don't depend on today.
+- Workflow: `ruff check` + `ruff format --diff`, fix, repeat until clean
+
+**Open items**
+- [ ] Cell 1: delete the blank first line (last `ruff format --diff` item)
+- [ ] Next: cell 2 — load `data/raw/employees.csv` (`dtype=str`), `TRAVEL_PROB` dict, asserts: 10 rows, unique `employee_id`, all departments in `TRAVEL_PROB`, every `manager_id` exists or is `BOARD`
+
+### Session 3 — 2026-11-16/17 — Notebook 01, cells 2–6c
+**Done**
+- Cells 2–4c (built between sessions): employees + `TRAVEL_PROB`, date/money/mileage helpers, lookups (cities, merchants, `CLIENTS`), `blank_item`, `make_clean_item`, clean-item tests (2000 items, 0 near/over cap)
+- 5a `ReportDraft` (NamedTuple), `LOCAL_POOLS`, `local_purpose`, `make_travel_items`, `make_local_items` → "Report builders OK: 2000 drafts checked"
+- 5b `build_reports()` → 100 reports, 330 claims, 58% travel, lag 3–41 days, all clean labels
+- 6a `plan_violations()` → 82 planned (24.8%): prohibited 19, over_cap 16, missing_receipt 14, late 11, duplicate 7, premium 6, extension 6, split 3
+- 6b-1 builders: over cap, prohibited, missing receipt, late (pure functions, tested on all 330 claims, originals untouched)
+- 6b-2 builders: duplicate, split, weekend extension, premium airfare + `apply_violations()` → approve 248 / deny 82
+- 6c `add_review_cases()` → expected on clean Run All: approve 231 / deny 82 / review 17 (vague 12, near_cap 4, high_value 1)
+
+**Errors and fixes**
+- `local_purpose` missing "Office Supplies" → 23% of local items had empty purpose; fallback `case _` now raises `ValueError`; added non-empty purpose assert
+- `rand_date()` called with 1 arg (misplaced parentheses) → `rand_date(WINDOW_START + timedelta(days=25), WINDOW_END, rand)`
+- 5b loop used `range(...)` instead of `employees.itertuples(index=False)` (AttributeError: 'int' has no 'employee_id'); wrong return type hint
+- 6b-1: missing "Office Supplies" case, `"Client_Meals"`, `item["'miles"]`, missing `.days`, `capo` silently using a stale `cap` from an earlier cell, wrong notes, `"lodging"` lowercase
+- 6b-2: NameError after kernel restart (ran one cell alone); `"in_police"` typo caught by the column-check assert
+- 6c: 19 reviews instead of 17 because a failed rerun advanced `rng` → Restart → Run All
+
+**Learned**
+- Read tracebacks bottom-up; AttributeError on wrong type → check where the variable was created
+- Catch-all `case _:` should raise, not return a silent default
+- Silent bugs (stale notebook variables, typo'd dict keys) are worse than crashes → assert on columns and values, not just counts
+- Builders return new dicts and never mutate inputs; tests use `test_rng`, generation uses `rng`
+- Shared RNG: any rerun (even a failed one) shifts every later cell → always Restart → Run All
+- `round()` uses banker's rounding (82.5 → 82); compare `value_counts()` via `.to_dict()`
+- `NamedTuple` for multi-value returns; dict of functions (`SINGLE_BUILDERS`) instead of long if/elif
+
+**Open items**
+- [ ] 6c: restore `is_borderline` count assert; fix `OF ${cap:,.2F}` → `of ${cap:,.2f}`; typos (dey/bolds/charged)
+- [ ] Restart → Run All; confirm review = 17
+- [ ] `uv run ruff format notebooks` (cells 5b–6c not formatted)
+- [ ] `# Pol-1.3` → `POL-1.3` in cell 4b; `CLIENTS` has 9 (Vandelay missing) — optional
+- [ ] Carried over: `env.example` LANGFUSE_BASE_URL rename; leftover `gitignore.txt`, `sessions_2.md`, `main.py`; Jev API key
+- [ ] Next: 6d — save CSV/XLSX/JSON + ground truth to `data/generated/`, run validator, compare with reference
+
+### Session 3 (cont.) — 2026-11-17 — Cell 6d drafted, not yet run
+**Done**
+- Reviewed 6c: `is_borderline` count assert already restored; saved output approve 231 / deny 82 / review 17 (24.8% out of policy)
+- Cell 6d code written in chat (below), not yet typed or run: `build_export_table()`, `nest_reports()`, `write_outputs()` → `data/generated/` (CSV, XLSX, nested JSON, `ground_truth_labels.csv`) with read-back checks
+
+**Learned**
+- Labels live in a separate file joined on `claim_id`, so the agent can't see the answers
+- `merge(validate="many_to_one")` raises an error instead of silently duplicating rows
+- `Int64` (nullable int) keeps `nights`/`attendees`/`miles` as integers with blanks
+- `date.isoformat` gives sortable, portable date strings
+- `json.loads(df.to_json(orient="records"))` converts numpy ints and `pd.NA` to plain JSON
+- Check a write by reading the file back, not by trusting memory
+
+**Open items**
+- [ ] 6c fixes: `Answer-dey` → `Answer-key`, `bolds` → `holds`, `charged` → `changed`, `OF ${cap:,.2F}` → `of ${cap:,.2f}`, `assert  before_bad` → one space
+- [ ] `uv run ruff format notebooks`, then `uv run ruff check notebooks`; wrap lines over 79 chars by hand
+- [ ] Add `import json` to cell 1 (stdlib group)
+- [ ] **Next: type cell 6d (code below), Restart → Run All; expect "100 reports, 330 claims exported", review = 17**
+- [ ] Then 6e: validator checks vs reference dataset
+- [ ] Reflect: why does the answer key share only `claim_id` with the import files, and what breaks if `claim_id` isn't unique?
+- [ ] Carried over: `# Pol-1.3` → `POL-1.3` (cell 4b); `CLIENTS` missing Vandelay; `env.example` LANGFUSE_BASE_URL; leftover `gitignore.txt`, `sessions_2.md`, `main.py`; Jev API key
+
+**Cell 6d code**
+```python
+# 6d Export: import files (no labels) + answer key, to data/generated/
+OUT_DIR = ROOT / "data" / "generated"
+REPORT_COLS = [
+    "report_id",
+    "employee_id",
+    "employee_name",
+    "department",
+    "manager_id",
+    "report_title",
+    "submitted_date",
+    "currency",
+]
+ITEM_COLS = [
+    "claim_id",
+    "line_no",
+    "expense_date",
+    "category",
+    "merchant",
+    "description",
+    "business_purpose",
+    "amount",
+    "city",
+    "nights",
+    "attendees",
+    "attendee_names",
+    "fare_class",
+    "flight_hours",
+    "rental_class",
+    "miles",
+    "preapproved",
+    "receipt_attached",
+]
+IMPORT_COLS = REPORT_COLS[:-1] + ITEM_COLS[:8] + ["currency"] + ITEM_COLS[8:]
+LABEL_COLS = ["claim_id", *CLEAN_LABELS]
+INT_COLS = ["nights", "attendees", "miles"]
+
+
+def build_export_table(
+    claims: list[dict[str, Any]],
+    reports: list[dict[str, Any]],
+    employees: pd.DataFrame,
+) -> pd.DataFrame:
+    """Join claims with report and employee fields; one row per claim."""
+    titles = pd.DataFrame(reports)[["report_id", "report_title"]]
+    people = employees[
+        ["employee_id", "employee_name", "department", "manager_id"]
+    ]
+    flat = (
+        pd.DataFrame(claims)
+        .merge(titles, on="report_id", how="left", validate="many_to_one")
+        .merge(people, on="employee_id", how="left", validate="many_to_one")
+    )
+    flat["currency"] = "USD"
+    for col in ("expense_date", "submitted_date"):
+        flat[col] = flat[col].map(date.isoformat)
+    for col in INT_COLS:
+        flat[col] = flat[col].astype("Int64")
+    return flat.sort_values(["report_id", "line_no"]).reset_index(drop=True)
+
+
+def nest_reports(flat: pd.DataFrame) -> dict[str, Any]:
+    """Group flat rows into reports -> line_items (an app upload shape)."""
+    nested = []
+    for _, group in flat.groupby("report_id", sort=True):
+        header = group.iloc[0][REPORT_COLS].to_dict()
+        items = json.loads(group[ITEM_COLS].to_json(orient="records"))
+        nested.append({**header, "line_items": items})
+    return {"company": "Techstack.io", "reports": nested}
+
+
+def write_outputs(flat: pd.DataFrame, out_dir: Path) -> dict[str, Path]:
+    """Write the label-free import files and the separate answer key."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    paths = {
+        "csv": out_dir / "expense_reports.csv",
+        "xlsx": out_dir / "expense_reports.xlsx",
+        "json": out_dir / "expense_reports.json",
+        "labels": out_dir / "ground_truth_labels.csv",
+    }
+    imports = flat[IMPORT_COLS]
+    imports.to_csv(paths["csv"], index=False)
+    imports.to_excel(paths["xlsx"], index=False, sheet_name="claims")
+    paths["json"].write_text(json.dumps(nest_reports(imports), indent=2))
+    flat[LABEL_COLS].to_csv(paths["labels"], index=False)
+    return paths
+
+
+export_df = build_export_table(final_claims, reports, employees_df)
+paths = write_outputs(export_df, OUT_DIR)
+
+# --- checks (read the files back; never trust what is still in memory) ---
+csv_back = pd.read_csv(paths["csv"])
+xlsx_back = pd.read_excel(paths["xlsx"], sheet_name="claims")
+json_back = json.loads(paths["json"].read_text())
+labels_back = pd.read_csv(paths["labels"])
+
+assert set(IMPORT_COLS) & set(LABEL_COLS) == {"claim_id"}, "Label leak"
+assert list(csv_back.columns) == IMPORT_COLS, "CSV columns wrong"
+assert len(csv_back) == len(xlsx_back) == len(final_claims), "Row count"
+assert csv_back["claim_id"].is_unique, "Duplicate claim_id"
+assert export_df["employee_name"].notna().all(), "Employee join failed"
+assert export_df["report_title"].notna().all(), "Report join failed"
+
+n_items = sum(len(r["line_items"]) for r in json_back["reports"])
+assert len(json_back["reports"]) == len(reports), "JSON report count"
+assert n_items == len(final_claims), "JSON line-item count"
+
+joined = csv_back.merge(labels_back, on="claim_id", validate="one_to_one")
+assert (
+    joined["expected_decision"].value_counts().to_dict()
+    == final_df["expected_decision"].value_counts().to_dict()
+), "Labels don't round-trip"
+
+for name, path in paths.items():
+    print(f"{name:>6}: {path.relative_to(ROOT)} ({path.stat().st_size:,} B)")
+print(f"{len(json_back['reports'])} reports, {n_items} claims exported")
+```
+
+### Plan change — 2026-11-18 — Data analysis, visualizations and forecasting added
+**Decision:** add summary statistics, visualizations and forecasting to the notebooks **and** to the deployed app. No renumbering, so all existing references (e.g. "notebook 03 catches 51 of 82") stay valid.
+
+| # | Notebook | Change |
+|---|---|---|
+| 00 | setup | done |
+| 01 | generate_data | + **section 7: spend-history generator** |
+| **01b** | **explore_data** | 🆕 summary statistics + visualizations |
+| 02 | generate_receipts | unchanged |
+| 03 | policy_rules | unchanged |
+| 04 | anomaly_model | unchanged; uses features found in 01b |
+| **04b** | **spend_forecast** | 🆕 forecasting + backtesting |
+| 05 | agent_graph | + optional "department at X% of forecast" context signal |
+| 06 | evaluation | + charts: confusion-matrix heatmap, $ leaked by violation type, review-queue volume |
+| app | Streamlit | + **Analytics** and **Forecast** pages |
+
+**Why here:** EDA right after the data exists (understand before modeling; findings feed 03 thresholds and 04 features). Forecasting beside the anomaly model (both classical ML, both MLflow, both need leakage-safe time handling).
+
+**Constraint:** claims cover only 6 months (May–Oct 2026), too few points to forecast or backtest. Section 7 generates a separate history; the labeled claims set (and every evaluation number) stays unchanged.
+
+**Defaults chosen:** forecast target = **monthly spend by department** (budgeting); history = **36 months, weekly**, by department (3 full seasonal cycles). Weekly review-queue volume is a possible stretch target.
+
+#### 01 section 7 — spend history
+1. `generate_spend_history(start, months, rand)`: weekly spend per department = trend × seasonality (Q4 conference spike, summer travel, December dip) × noise; parameters as named constants; scaled to the same 10-person company
+2. Export `data/generated/spend_history.csv`
+3. Checks: no gaps in the weekly index, all values positive, planted Q4 peak visible in monthly totals
+
+#### 01b_explore_data.ipynb — summary statistics + visualizations
+0. Notebook → module: move `load_dataset`, `clean_cap`, `city_tier`, `load_policy` into `src/expense_agent/` with tests (notebooks can't import from each other)
+1. Data profile: dtypes, null %, `describe()`, cardinality → small data dictionary
+2. Summary stats: spend by category / department / employee with named `groupby().agg()` (count, sum, mean, median, p90)
+3. Distributions: amount histogram (log scale), box plots by category, amount as % of cap
+4. Time patterns: monthly spend, day-of-week mix, submission lag vs the 60-day limit
+5. Label-aware view (understanding only): violation rate by category/department, in- vs out-of-policy amounts, chi-square test of violations vs department (expect non-significant: violations were planted at random)
+6. Findings: 3–5 written bullets, each tagged with the notebook it feeds (03 or 04)
+- Gate: reproducible charts, every title states the takeaway, findings written
+- Teach: one plotting style helper; labeled axes and units; label-aware EDA must not tune the anomaly model (leakage)
+
+#### 04b_spend_forecast.ipynb — forecasting
+1. Load history, resample monthly, STL decomposition (recover the planted trend and seasonality)
+2. Baselines: naive and seasonal-naive (every model must beat them)
+3. Holt-Winters / ETS (`statsmodels`)
+4. `HistGradientBoostingRegressor` on lag, rolling-mean and month features (no leakage)
+5. Rolling-origin backtest; metrics MAE and MASE
+6. Prediction intervals; 3-month forecast chart per department
+7. MLflow: one run per model (params, metrics, backtest plot); register the best model for the app
+- Gate: best model beats seasonal-naive on MASE; runs visible in MLflow; a written paragraph on when to trust the forecast
+
+#### Deployed app — analytics in Streamlit
+- **Analytics page:** KPI tiles (total spend, claims, approve/deny/review mix, violation rate); filters (department, category, date range); spend by category, monthly trend, amount-vs-cap distribution, violation rate by department; summary-stats table
+- **Forecast page:** 3-month forecast per department with intervals, actual vs forecast, budget variance
+- **Single source of truth:** stats, chart and forecast functions live in `src/expense_agent/analytics.py` and `forecast.py`, used by both notebooks and the app (no copy-pasted logic)
+- App loads the registered forecast model from MLflow (or a saved artifact) instead of retraining on page load; `st.cache_data` for data, `st.cache_resource` for the model
+- Decide at app stage: interactive chart library, Altair (already bundled with Streamlit) vs Plotly
+- Tests: Analytics page numbers match the 01b summary table; forecast loads and predicts the right horizon
+- Docker image includes the model artifact
+
+**Setup (Mac Terminal, when we reach 01b):** `uv add matplotlib seaborn statsmodels`
+
+**Open items (added)**
+- [ ] Finish 01: 6e validation, then section 7 (spend history)
+- [ ] 01b explore_data (module move first)
+- [ ] 04b spend_forecast after 04
+- [ ] App: Analytics + Forecast pages
+- [ ] Mentor skill updated with 01 section 7, 01b, 04b and app analytics (proposed 2026-11-18)
+
+### Session 4 — 2026-11-18 — Notebook 01 complete (6d, 6e, 7a)
+**Done**
+- 6d export → `data/generated/`: expense_reports CSV (90,619 B) / XLSX (47,325 B) / nested JSON (253,772 B) + `ground_truth_labels.csv` (15,436 B); read-back checks pass; 100 reports, 330 claims
+- 6e validation (reads files only): schema matches reference; 0 in-policy claims break a hard rule (checked on generated AND reference data); duplicates detectable from files; out of policy 24.8%, borderline 4.8%
+  - Decisions: generated 231 / 82 / 17 vs reference 228 / 82 / 18 (approve / deny / review)
+  - Simple hard rules (late, receipt, over cap) catch 43 of 82; not caught: prohibited 17, duplicate 7, premium 6, extension 6, split 3
+- 7a spend history → `data/generated/spend_history.csv`: 780 rows (156 weeks × 5 depts), 2023-11-06 → 2026-10-26; growth +15.8% (planted 1.08² ≈ +16.6%); calibration 1.08x vs claims; seasonal index Dec 0.65 (min), Oct 1.22, Nov 1.19, Jun–Jul ≈ 1.14
+- Plan change logged (01 section 7, 01b, 04b, app Analytics + Forecast pages); mentor skill update proposed
+- `ruff check` + `ruff format --diff` clean (ruff defaults, 88 chars)
+
+**Findings**
+- Multi-violation claims: R-E005-04-L2 ($113.30) and R-E007-02-L4 ($109.67) are prohibited Meals that are also over the $75 per diem; labeled `prohibited_category` only. Kept on purpose (realistic) → 03 `run_rules()` returns every violation; 06 scores decisions, and a type counts as caught if it appears among the flags; 05 rationale cites every policy broken
+- Planted Nov (1.25) > Oct (1.20), but Oct comes out on top: the Octobers are 2024–26 and the Novembers 2023–25, so trend and seasonality are tangled → STL in 04b
+
+**Errors and fixes**
+- 6d `NameError: ROOT` → ran one cell on a fresh kernel (`In[1]`) → Restart → Run All
+- 7a `ValueError: truth value of a Series is ambiguous` → missing `.mean()` on `recent`; a Series reached `assert`
+- sessions.md: plan-change block was lost (likely an editor saving an older buffer) → restored; close or reload sessions.md in the editor before Claude writes to it
+
+**Learned**
+- Labels in a separate file joined on `claim_id`; `merge(validate=...)`; `Int64`; `date.isoformat`; `json.loads(df.to_json())`; verify writes by reading back
+- `keep_default_na=False` so empty label strings stay `""` and don't become NaN
+- Test the test: run the checker on the reference too
+- Independent RNG stream (`SEED + 1`) → that cell can rerun alone without shifting other data
+- Mean weekly spend per month avoids the 4-vs-5-week calendar effect
+- Traceback reading: `In[1]` on a non-first cell = fresh kernel; `NDFrame.__bool__` = Series where a bool was expected
+
+**Open items**
+- [ ] Delete scratch cell (`bad.loc[...]`) and the empty last cell in 01
+- [ ] Optional: `[tool.ruff] line-length = 79` (~70 lines currently over 79)
+- [ ] Mac Terminal: `uv add matplotlib seaborn statsmodels`
+- [ ] **Next: 01b cell 0, the module move (`load_dataset`, `clean_cap`, `city_tier`, `load_policy` → `src/expense_agent/` + tests); approval per file**
+- [ ] Carried over: `# Pol-1.3` → `POL-1.3`; `CLIENTS` missing Vandelay; `env.example` LANGFUSE_BASE_URL; leftover `gitignore.txt`, `sessions_2.md`, `main.py`; Jev API key
+
+### Session 5 — 2026-11-19 — 01b sections 0–6 complete
+
+**Done**
+- 01b cell 0 module move (done before this session): `src/expense_agent/`
+  `data.py` (load_claims / load_labels / load_dataset), `paths.py`,
+  `policy.py` (load_policy, city_tier, cap_usage) + `tests/test_data.py`,
+  `tests/test_policy.py`
+- `cap_usage`: return type → `tuple[float, float] | None`; Client Meals guard
+  for missing/zero attendees (returns None) + parametrized test
+- 01b sections 1–6: profile, summary stats, distributions (4a–4c), time
+  patterns (5a monthly + weekday, 5b submission lag), label-aware view
+  (6a violation rates + Wilson 95% CI, 6b amounts + late rule vs labels,
+  6c chi-square)
+
+**Results**
+- 330 claims, 82 out of policy (24.8%); total $117,377
+- 5a: expense dates 2026-02-21 → 2026-10-17; July peak; Feb–Apr + Oct partial
+  (gray); Monday = 45% of claims (generator artifact); weekend 14%
+- 5b/6b: 11 late (> 60 days); rule vs labels 11/11, 0 FP, 0 misses
+- 6a: Conference / Home Office 40% (wide CIs), Software 2/34, Mileage 0/7;
+  every department CI includes the overall rate
+- 6b: violations = 25% of claims, 46% of dollars; median $313 vs $207,
+  Mann-Whitney p < 0.001; distributions overlap heavily
+- 6c: department chi2 = 3.87, dof 4, p = 0.424, Cramér's V = 0.11 → no
+  evidence; category not tested (min expected 1.7 < 5)
+
+**Errors and fixes**
+- 4c `assert ...all` without `()` → always passed (method object is truthy)
+- 5a `NameError: claims` → was in the wrong notebook; then kernel restart
+  without Run All
+- 5a partial-month colors placed in 5b → drew on 5a's already-shown axes;
+  moved into 5a
+- 6a `AssertionError: rate outside its interval` → missing `~` on in_policy
+  (rates were ~75%); Wilson bound at 0%/100% off by ~1e-17 → clip bounds
+  to the rate
+- 6b title `$313 vs $207` rendered as math → `text.parse_math = False`
+
+**Learned**
+- Wilson intervals; float boundaries need clipping or tolerance; anchor
+  asserts to known reference numbers (24.8%)
+- Mann-Whitney for skewed amounts; report "p < 0.001", not "p = 0.000"
+- Chi-square: expected count ≥ 5; dof = (r−1)(c−1); Cramér's V as effect
+  size; "not significant" ≠ "no difference" (low power at n = 29)
+- A cell only draws on axes it created; Run All after editing `src/`
+
+**Decisions**
+- Label-aware rates never tune 03 rules or 04 features
+- 04: features relative to employee/category; weekend flag ok, no
+  day-of-week or department features
+- 06: report dollars leaked alongside false-approval count
+
+**Open items**
+- [ ] **Next: 01b section 7 Findings (markdown, 5 bullets tagged 03/04/04b/06)**
+- [ ] 01b gate: Restart → Run All clean; check 4a title for `$` math;
+      delete scratch cell; fix typos (`mots`, `zlate`, `day-o-week`)
+- [ ] `uv run ruff check` + `ruff format --diff` on notebooks/src/tests
+- [ ] Then 02_generate_receipts (or 03 first — decide next session)
+- [ ] Carried over: `# Pol-1.3` → `POL-1.3`; `CLIENTS` missing Vandelay;
+      `env.example` LANGFUSE_BASE_URL; leftover `gitignore.txt`,
+      `sessions_2.md`, `main.py`; Jev API key
+
+### Session 6 — 2026-11-20 — 01b closed; 03 cells 1–6b
+
+**Done**
+- 01b section 7 Findings (5 bullets tagged 03/04/04b/06); gate passed:
+  removed unused `yaml`, import order fixed (`ruff check --fix`),
+  `ruff format .` applied (5 files, default 88 chars), pytest 19 passed
+- `policy.py`: Client Meals guard restored (missing/zero attendees →
+  None; the Session 5 edit had not reached disk); docstring typo fixed
+- `config/policy.yaml`: each `prohibited` entry now has `policy_ref`
+  (POL-3.1–3.6) and `keywords` (taken from the policy text, not the data)
+- 03_policy_rules.ipynb cells 1–6b:
+  1 imports, policy, claims (no labels; leakage assert)
+  2/2b `Claim` + `Violation` (Pydantic, frozen); `ViolationCode` Literal
+     matches policy.yaml; `policy_ref` pattern `^POL-\d+\.\d+$`
+  3/3b late (POL-1.2), receipt (POL-1.3) + boundary tests
+  4/4b caps via shared `cap_usage`; per-category refs; round to cents
+  5/5b fare class (POL-2.1), rental class (POL-2.5), mileage by date
+     (POL-2.6)
+  6/6b `Flag` model; prohibited-keyword hints; unapproved vendor
+
+**Results**
+- late 11, receipt 14, over_cap 18 → 43 claims (matches 6e exactly)
+- + premium_class 6 → 49 claims, 49 violations (no overlap)
+- rental 0, mileage 0; software: 34 claims, all approved → 0 flags
+- Cell 6: prohibited_hint count not recorded (fill in from cell 6);
+  unapproved_vendor 0
+
+**Errors and fixes**
+- `load_policy(path)` takes a file and `load_claims(folder)` a folder →
+  check with `help()` before calling
+- 2b: `err.error_count` without `()`; model field `details` vs `detail`
+  (`extra="forbid"` → 2 errors); test dict sent a *valid* `POL-2.2` →
+  the negative test passed for the wrong reason → assert on `err.errors()` loc
+- 4b ZeroDivisionError: guard missing on disk, then a stale kernel → restart
+- 5: `raise` inside the `for` loop in `mileage_rate` → dedent (search, then fail)
+- 5b: POL-2.8 false positives = typo in the software rule; querying the
+  data showed 0 unapproved vendors
+- 6: `compile_prohibited(Policy)` passed the type alias, not the data;
+  KeyError 'keywords' = stale `policy` in memory after the YAML edit
+
+**Decisions**
+- Violation = deny with a citation; Flag = review/hint
+  (prohibited_hint, unapproved_vendor, high_value, near_cap)
+- Unapproved software vendor → Flag (POL-2.8: "needs IT approval"),
+  not a deny
+- Prohibited: keyword hints in 03 + the agent makes the final call in 05;
+  keywords from the policy text only; "Fine dining" is a known false positive;
+  measure the real catch rate in 06 (synthetic text shares the policy's words)
+- Rental upgrade → `premium_class` (POL-2.5); mileage over → `over_cap` (POL-2.6)
+
+**Learned**
+- Negative tests must check *why* they fail; inspect `Model.model_fields`
+- `model_copy(update=...)` skips validation (tests only)
+- In memory vs on disk: restart after editing `src/` or YAML;
+  `%autoreload` reloads modules only, not loaded data
+- Recompute from the source when debugging, not from leftover variables
+- `PascalCase` = type, `snake_case` = data
+- Regex: `re.escape`, `\b...s?\b`, compile once
+- Ruff: import order rules, `check --fix && format`, `--diff`/`--check`
+  are read-only; the `except ... as err` name is deleted after the block
+
+**Open items**
+- [ ] **Next: 03 cell 7, escalation flags: high_value > $1,000
+      (POL-5.1), near_cap within 10% (POL-5.2)**
+- [ ] Then cross-claim rules: duplicates (keep first, POL-1.4), splits
+      (POL-1.5); `run_rules()`; ipytest tests; cell 8 score vs labels
+      (49 so far; expect 0 false positives)
+- [ ] Decide line length 79 vs 88; VS Code format-on-save
+- [ ] Import `Policy` from `expense_agent.policy` instead of redefining it
+- [ ] Mentor skill: add the Flag model + software-as-Flag correction
+- [ ] Carried over: `# Pol-1.3` → `POL-1.3`; `CLIENTS` missing Vandelay;
+      `env.example` LANGFUSE_BASE_URL; leftover `gitignore.txt`,
+      `sessions_2.md`, `main.py`; Jev API key
+
+### Session 7 — 2026-11-22 — 03 cells 7–9 (escalation, cross-claim, run_rules)
+
+**Done**
+- 7a/7b escalation Flags: `check_high_value` (POL-5.1, strictly > $1,000)
+  and `check_near_cap` (POL-5.2, band [cap × (1 − pct), cap], reuses
+  `cap_usage`); boundary tests incl. the $150.01 handoff to `check_cap`
+- 8a duplicates (POL-1.4): `claims_frame()` sorts by submitted_date then
+  file order; keys employee/date/merchant/amount_cents; keep first;
+  detail names the original claim
+- 8b splits (POL-1.5): only per-purchase/per-event caps (read from YAML);
+  every part ≤ cap and total > cap; first part stands; duplicates
+  excluded first via `skip_ids`
+- 8c tests: duplicate found by submission date (list passed reversed);
+  split over cap → 2nd part denied; total within cap → none
+- 9 `run_rules()`: one row per claim (rule_decision, violations, flags,
+  policy_refs, details); `collect_findings()` returns violations and
+  flags as separate lists; invariant asserts
+- Added `from collections import defaultdict` to cell 1
+- Cell 10 (score vs labels) drafted, not yet run
+
+**Results**
+- high_value 15, near_cap 4 → 19 claims (near_cap = the 4 planted
+  borderline items)
+- duplicates 7, splits 3, overlap with single-claim violations 0
+- run_rules: approve 240 / deny 59 / review 31
+- Violations caught: 59 of 82 (49 single-claim + 10 cross-claim)
+
+**Errors and fixes**
+- 8a KeyError `'merchant", "amount_cents'`: mixed quotes made two keys
+  one string → read the last traceback line; print the input
+- 8b detail `$661.06over`: adjacent f-strings join with no space → put
+  the space inside the first string
+
+**Decisions**
+- Precedence: any Violation → deny; else any Flag → review; else approve
+- Flags stay on denied rows (a resubmitted fix becomes review automatically)
+- Money compared in integer cents, never as floats
+- Splits stay a Violation for now (open question: Flag instead?)
+
+**Learned**
+- Chained comparison `lower <= value <= cap`; test both edges plus the
+  handoff between rules
+- `kind="stable"`, `groupby().transform("first")`, `itertuples()`
+- Extended unpacking `first, *rest = ...`; `found.extend(<generator>)`
+- `defaultdict(list)`; invariants as asserts; `Literal` for decisions
+- Adjacent string literals concatenate with nothing in between
+
+**Open items**
+- [ ] **Next: run 03 cell 10 (score vs labels): expect 59 of 82,
+      0 false positives; record false-approval rate + $ leaked as the
+      rules-only baseline for 06**
+- [ ] Reflect answers pending: two flags vs one in the router; split as
+      deny vs Flag; vague-purpose keyword Flag (POL-5.3) in 03 or the agent
+- [ ] Then ipytest tests (one pass/fail per rule); move rules into
+      `src/expense_agent/rules.py` + `tests/` (approval first);
+      `validate.py` PEP 8 refactor
+- [ ] Fix `Rule` / `apply_rules` type hints (they also return Flags)
+- [ ] Record the cell 6 prohibited_hint count
+- [ ] Carried over: line length 79 vs 88 + format-on-save; import `Policy`
+      from `expense_agent.policy`; mentor skill: Flag model +
+      software-as-Flag; `# Pol-1.3` → `POL-1.3`; `CLIENTS` missing
+      Vandelay; `env.example` LANGFUSE_BASE_URL; leftover `gitignore.txt`,
+      `sessions_2.md`, `main.py`; Jev API key
+
+### Session 8 — 2026-11-22 — 03 cell 10 (score vs labels); splits fixed
+
+**Done**
+- Cell 10 score vs labels (evaluation only): guard asserts (IDs match,
+  `in_policy` is bool), `merge(validate="one_to_one")`, catch rate,
+  type match, confusion matrix, false-approval baseline, misses by type
+- 10b/10c diagnostics: false positives traced to split pairs
+- 8b `check_splits` now denies **every part** of a split (POL-1.5:
+  the purchase is the violation); detail names the other part(s)
+- 8c split test → `sorted(...) == ["T-P1", "T-P2"]`
+- Cell 10 scores splits per purchase: `named_claims()` regex on
+  details; `same_purchase` excuses a clean half only if its sole
+  violation is split_transaction AND it names a labeled split
+
+**Results (rules-only baseline for 06)**
+- run_rules: approve 237 / deny 62 / review 31
+- Caught 59 of 82; labeled type among rule codes 57 (2 prohibited
+  meals denied as over_cap); false positives 0; same_purchase 3
+- False-approval rate **7.3% (6 of 82)**; dollars leaked **$2,394.30**
+  (all 6 = personal_extension)
+- Label deny sent to review: 17 ($2,900.89), all prohibited_category
+  (keyword hints; synthetic text shares policy words → recheck in 06)
+- Confusion matrix: approve→deny 3 (clean split halves, expected);
+  approve→review 6; **review→approve 9** (likely vague purpose,
+  POL-5.3)
+
+**Errors and fixes**
+- First run caught 57, not 59: the Session 7 "59" was the deny count,
+  never checked against labels. Split halves share report and
+  submitted_date, so the rule fell back to file order; the generator
+  labeled L1, the rule denied L2/L3 → 2 swaps
+- `label_deny.sum(())` → empty tuple passed as `axis` ("No axis
+  named ()")
+- `${leaked:.1%}` on money → use `:,.2f`; `%` only for rates
+- `policy_ref="PPL-1.5"` → caught by the Violation regex pattern
+- Placeholders `a, b` typed literally → NameError
+- Still 57 after the fix: `rule_results` stale (cell 9 not rerun) →
+  Restart & Run All
+
+**Decisions**
+- B + A: deny every split part (policy text) + score splits per
+  purchase; never flip a rule to match the answer key's convention
+- Weight deny→approve highest; track review→approve separately (POL-5
+  control skipped)
+
+**Learned**
+- Anchors must be verified against labels, not assumed
+- Traceback: last line first, then the `--->` in your own cell
+- Pydantic pattern validation catches bad citations at creation
+- A fixed function doesn't update results already computed → Run All
+- `zip` list comprehension over `apply(axis=1)`; `re.findall`;
+  narrow exceptions in scoring (all three conditions required)
+
+**Open items**
+- [ ] **Next: 03 cell 10d: group the 9 review→approve claims by
+      `review_reason`; decide vague-purpose Flag (POL-5.3) in 03 vs agent**
+- [ ] Delete or tidy 10b/10c (reuse `named_claims()`)
+- [ ] Reflect pending: split resubmission (approve $500 + deny excess?)
+      as an agent notification suggestion, not a rule
+- [ ] Then ipytest tests (one pass/fail per rule); move rules into
+      `src/expense_agent/rules.py` + `tests/` (approval first);
+      `validate.py` PEP 8 refactor
+- [ ] Fix `Rule` / `apply_rules` type hints (they also return Flags)
+- [ ] Record the cell 6 prohibited_hint count
+- [ ] Carried over: line length 79 vs 88 + format-on-save; import
+      `Policy` from `expense_agent.policy`; mentor skill: Flag model +
+      software-as-Flag + split-all-parts; `# Pol-1.3` → `POL-1.3`;
+      `CLIENTS` missing Vandelay; `env.example` LANGFUSE_BASE_URL;
+      leftover `gitignore.txt`, `sessions_2.md`, `main.py`; Jev API key
+
+### Session 9 — 2026-11-23 — 03: 10b (new), 7c, type hints, test suite
+
+**Done**
+- 10b (new): review-labeled claims by `review_reason` × rule decision.
+  Old diagnostic 10b/10c deleted (superseded by cell 10's
+  `same_purchase` logic + anchors)
+- 7c `check_missing_purpose` Flag (POL-5.3, "missing" half only):
+  `"missing_purpose"` added to `FlagCode`; tests go through
+  `model_validate` (None / "" / whitespace → flag; "Meeting" → None);
+  added to `ESCALATION_RULES`
+- Type hints: `type Rule[F] = Callable[[Claim, Policy], F | None]`;
+  `apply_rules[F](...) -> list[F]`; rule lists annotated
+  `list[Rule[Violation]]` / `list[Rule[Flag]]`
+- Bug fixed: cell 5 still held the old `Violation` version of
+  `check_software_vendor` (prohibited_category, POL-2.8) in
+  `SINGLE_CLAIM_RULES`; removed (6a's Flag version is the only one);
+  seam test added to cell 9
+- Test suite (ipytest): 11a fixtures (`policy`, `make_claim` factory),
+  11b 22 passed (single-claim deny rules), 11c 26 passed (flags,
+  cross-claim, `rule_decision`, pipeline seams) → 48 tests
+- 7c / 10b header strings changed back to `#` comments
+
+**Results**
+- 10b: 17 review labels = vague_purpose 12, near_cap 4, high_value 1.
+  Rules catch every near_cap and high_value; vague: 9 approved,
+  3 reviewed by unrelated flags (right decision, wrong reason)
+- missing_purpose fires 0 times (generator never leaves purpose blank)
+- Cell 6 prohibited_hint count: 26
+- Baseline unchanged: 237 / 62 / 31; 59 of 82 caught; 0 false
+  positives; false approvals 7.3% ($2,394.30)
+
+**Errors and fixes**
+- 7a `NameError: check_missing_purpose`: 3-item list pasted into 7a,
+  but the function is defined in 7c → define before use (instructions
+  were unclear: one heading over two blocks)
+- `parameterize` → `parametrize`: an unknown mark is silently ignored,
+  so parameters showed up as "fixture 'days' not found"
+- 20 vs 22 passed: `test_rental_class` missing → write down the
+  expected count before running
+- `UsageError: %%pytest` → `%%ipytest` (UsageError = check the magic line)
+- `StopIteration` in `make_claim`: typos `"meals"`, `"Office_Supplies"`
+  → helper now raises `ValueError` listing valid categories
+- Expected 48 for 11c, got 26: `ipytest.autoconfig()` clean mode runs
+  only the current cell's tests (26 was correct)
+
+**Decisions**
+- POL-5.3 split: missing → 03 Flag; vague → agent in 05. No
+  word-count rule: any threshold would be tuned on the labels
+- 06: count an escalation as caught only if the reason matches, not
+  just the decision
+- Tests hard-code policy numbers (an independent statement of the
+  policy); rules read them from YAML
+- Fixtures load from disk and use `name=` so they don't shadow
+  notebook globals
+
+**Learned**
+- PEP 695 generics: `type Alias[F] = ...`, `def f[F](...)`; hints are
+  for checkers and readers, not runtime
+- Rebinding a function name doesn't update lists holding the old
+  object → seam tests (`run_rules` on one crafted claim) catch wiring bugs
+- A docstring counts only as the first statement; other bare strings
+  are no-ops (ruff B018)
+- pytest: `parametrize`, named and factory fixtures, `scope="module"`,
+  `next(gen, None)` for clear errors
+- `None`-expected cases can pass by being skipped → pair each with an
+  over-the-line case built from the same claim
+
+**Open items**
+- [ ] **Next: item 3: move rules into `src/expense_agent/rules.py` +
+      `tests/test_rules.py` (approval per file); add `--strict-markers`
+      to pytest config; import `Policy` from `expense_agent.policy`;
+      then retire the bare-assert cells 3b–8c**
+- [ ] Save 03 (Cmd+S): the saved copy doesn't yet show the
+      `next(..., None)` fix in 11a; 7a docstring still says `POL-5..1`
+- [ ] `ruff check` + `ruff format` on notebooks/src/tests (trailing
+      spaces, brackets); pyproject `line-length = 79`
+- [ ] Reflect pending: what missing_purpose buys if it never fires;
+      a 4th `rule_decision` case; split resubmission as a notification
+      suggestion
+- [ ] Then the `validate.py` PEP 8 refactor (optional); decide 02 vs 04
+- [ ] Carried over: mentor skill updates (Flag model, software-as-Flag,
+      split-all-parts, POL-5.3 split, ipytest clean mode); `# Pol-1.3`
+      → `POL-1.3`; `CLIENTS` missing Vandelay; `env.example`
+      LANGFUSE_BASE_URL; leftover `gitignore.txt`, `sessions_2.md`,
+      `main.py`; Jev API key
+
+---
+
+### Session 10 — 2026-11-24/25 — Item 3: rules moved into the package
+
+**Done**
+- 11a: `make_claim` uses `next(gen, None)` + `ValueError` listing valid
+  categories (fix confirmed in saved 03)
+- `src/expense_agent/models.py` (new): `Claim`, shared `Finding` base
+  → `Violation` / `Flag`, `ViolationCode`, `FlagCode`, `Decision`,
+  `POLICY_REF_PATTERN`, `to_claims`
+- `src/expense_agent/rules.py` (new): every rule from 03 cells 3–9,
+  `apply_rules`, cross-claim checks, rule lists, `collect_findings`,
+  `rule_decision`, `run_rules` (+ `RESULT_COLUMNS`, `logging`)
+- `tests/conftest.py` (new): session-scoped `policy`, `claims`,
+  `make_claim`
+- `tests/test_models.py` (15) and `tests/test_rules.py` (56: the 48
+  from 11b/11c + 8 new) → full suite 90 passed
+- pyproject: `addopts = "--strict-markers"`; ruff lint select
+  E, W, F, I, N, D, UP, B; google docstrings; tests ignore D
+- Commits pushed: models, rules (562b905), tests (5371588);
+  lint config (ecbe966) committed, not yet pushed
+
+**Results**
+- Golden master: package `run_rules` == notebook `rule_results`
+  (`assert_frame_equal` on all 330 rows); 237 / 62 / 31 unchanged
+- `run_rules([])` → shape (0, 6), no crash
+- `ruff check src tests`: all checks passed under the new rules
+
+**Errors and fixes**
+- `test_models.py` saved in `src/expense_agent/` → moved to `tests/`
+- `{**claims[0].model_dump, ...}` → `model_dump()` ('method' object
+  is not a mapping)
+- `POLICY_REF_PATTERN` had a space and no `^`; a bad-ref case typed
+  as the valid `POL-2.2` passed only because the regex rejected
+  everything. Caught by the paired accept test
+- `purchase_caps`: unpacked into `key` instead of `rules` (undefined
+  name)
+- `mileage_rate`: `raise` indented inside the loop → every date after
+  Jun 30 raised (2026-10-05)
+- `FLAG_RULES` copy-pasted from `ESCALATION_RULES` → 24 claims
+  approve instead of review; escalation flags doubled
+- `check_high_value` detail `:.2f` → `:,.2f`
+- `git add` with one bad path aborts the whole add
+- zsh: inline `# comment` in a command is passed as an argument
+- Test file saved as `tests/rules.py` (not collected); editor tab kept
+  the old path after `mv` and re-created it on save
+- Missing comma in `parametrize` → `tuple indices must be integers`
+  (Python read it as indexing); ruff format ran on the broken code
+- test_rules.py: `{}` set instead of list (unhashable list),
+  `part2 = (...,)` tuple, merged vendor asserts, `"Office_Supplies"`,
+  `259.99` vs `249.99`, `.ge(0)` vs `.gt(0)` (could never fail)
+- `ruff check` "passed" before pyproject was edited (default rules
+  only); 6 E501 section-header comments fixed to 72 chars
+
+**Decisions**
+- `Policy` stays `dict[str, Any]` in `policy.py`; notebook copy retired
+- `check_prohibited_hint` compiles from its `policy` argument;
+  `PROHIBITED_PATTERNS` global removed (`re` caches compiled patterns)
+- Rule lists sit after all rule functions; one definition per name
+- `len(claims) < 2` guards in duplicate/split checks
+- Fixtures in `conftest.py`; helpers (`code_of`, `MakeClaim`) stay in
+  the test file (don't import from conftest)
+- Local `policy`/`claims` fixtures in test_policy/test_models left in
+  place for now (override conftest; cleanup commit later)
+- Notebook 03 committed separately in step 5
+
+**Learned**
+- Golden-master / characterization test: compare new code to a
+  known-good version; it caught 4 bugs ruff and type hints could not
+- Fixture scopes (session > module > function); deep-copy a shared
+  mutable fixture before changing it; `frozen=True` makes sharing safe
+- pytest collects only `test_*.py`; `--fixtures` shows where each
+  fixture comes from
+- `next(gen, default)`; nested comprehension reads like nested loops
+- `logger.info("%d", n)` defers formatting; f-string doesn't
+- Write the expected count down before running; chase any mismatch
+- A test that can't fail (`>= 0`) is worse than no test
+
+**Open items**
+- [ ] **Next: item 3, step 5: notebook 03 imports `Claim`/`Violation`/
+      `Flag`/rules from `expense_agent`; retire cells 3b–8c; re-run
+      9–10 (expect 237 / 62 / 31; 59 of 82; 0 FP); commit 03**
+- [ ] `git push` (ecbe966)
+- [ ] Cleanup commit: drop duplicate fixtures in test_policy /
+      test_models; "venerated" → "validated"; test_rules docstring
+      `expense_agent` → `expense_agent.rules`
+- [ ] Optional: VS Code `"editor.rulers": [72, 79]`
+- [ ] Reflect pending: skip_ids in check_splits (decision vs audit
+      trail); golden master vs correctness checks
+- [ ] Then the `validate.py` PEP 8 refactor (optional); decide 02 vs 04
+- [ ] Carried over: mentor skill updates (Flag model, software-as-Flag,
+      split-all-parts, POL-5.3 split, ipytest clean mode, package
+      layout models/rules + conftest); `CLIENTS` missing Vandelay;
+      `env.example` LANGFUSE_BASE_URL; leftover `gitignore.txt`,
+      `sessions_2.md`, `main.py`; Jev API key
+
+---
+
+### Session 11 — 2026-11-26 — Item 3 step 5: notebook 03 uses the package
+
+**Done**
+- 03 cell 1b: imports `to_claims` + `run_rules`, `rule_decision`,
+  `collect_findings` from `expense_agent`; check asserts
+  `__module__ == "expense_agent.rules"`
+- Retired 3b–8c (rule defs + bare asserts), models cell (Claim,
+  Violation, ViolationCode, to_claims, blank_to_none), cell 3
+  (Policy, Rule, check_late, check_receipt), 11a–11c (ipytest →
+  tests/); markdown notes left in their place
+- Cell 9 reduced to `run_rules(claims, policy)` + asserts + seam test
+- Cell 2 rebuilt: `claims = to_claims(claims_df)` + 330 / unique checks
+- Cell 10: `zip(..., strict=True)` (B905)
+- ruff check 03: all checks passed; ruff --fix also fixed 01
+  docstrings (D205, D411)
+- Commits: 3e2c79d (03), 6ec9613 (01), pushed
+
+**Results**
+- uv run pytest: 90 passed
+- 237 / 62 / 31; 59 of 82; 0 FP; false approvals 7.3% ($2,394.30);
+  first run where `claims` are package `Claim` objects
+
+**Errors and fixes**
+- 1b check printed 3× → print was inside the for loop
+- NameError apply_rules in cell 9: notebook's own run_rules /
+  collect_findings shadowed the import → kept only the call
+- 11b NameError check_cap etc. → retired 11a–11c (tests/ covers them)
+- ruff F811: Claim / Violation / to_claims / Policy still defined in
+  notebook → models cell + cell 3 deleted
+- `claims` undefined after deleting models cell → recovered line via
+  `git show HEAD:notebooks/03_policy_rules.ipynb | grep`
+- `ruff --fix` → `ruff check --fix`; ran on `.` and touched 01 too
+- Committed before confirming numbers (confirmed after: identical)
+
+**Decisions**
+- Keep cell numbers; gaps + markdown notes record where code moved
+- Notebook 03 is now a demonstration/scoring notebook; code lives in
+  src/, tests in tests/
+- Two commits: one change per commit
+
+**Learned**
+- Static analysis (F811) beats runtime spot checks for shadowing
+- grep for `def|class` misses type aliases (`X = Literal[...]`)
+- Closing bracket aligns with the line that opened it
+- `git show HEAD:<file>`, `git diff --stat`, pager `q`
+- Edit mode vs command mode; D D, Esc Z, A / B / M / Y
+
+**Open items**
+- [ ] **Next: decide 02 (receipts) vs 04 (anomaly model)**
+- [ ] Check `grep -n "violation_codes" tests/*.py`; if missing, add
+      ViolationCode ↔ policy.yaml drift test to test_models.py
+- [ ] Cleanup commit: "no receipt" → ", no receipt" (rules.py +
+      test); duplicate fixtures in test_policy / test_models;
+      "venerated" → "validated"; test_rules docstring
+- [ ] E501 × 13 in notebooks 01 / 01b (split long f-strings)
+- [ ] Delete leftovers: main.py, gitignore.txt, sessions_2.md
+- [ ] Reflect pending: what notebook 03 is for now; check placement
+      (1b check vs cell 9)
+- [ ] Carried over: mentor skill updates; CLIENTS missing Vandelay;
+      env.example LANGFUSE_BASE_URL; Jev API key
+
+---
+
+### Session 11 (cont.) — 2026-11-26 — Notebook 04 started (cells 0–3)
+
+**Done**
+- Created `notebooks/04_anomaly_model.ipynb`
+- Cell 0: imports; constants `SEED = 42`, `DATE_COLUMNS`,
+  `MIN_GROUP_SIZE = 3`, `N_ESTIMATORS = 200`, `REVIEW_SHARE = 0.10`;
+  `load_claims` only (no labels), dates parsed with `pd.to_datetime`;
+  asserts: 330 rows, unique claim_id, no label columns
+- 1a date features: `days_to_submit`, `is_weekend`
+- 1b amount features: `log_amount` (log1p), `amount_vs_cat_median`,
+  `amount_z_in_cat` (std 0 → NaN → z 0); self-check: median ratio
+  per category == 1.0
+- 1c employee features: `claims_in_month` (employee × expense month),
+  `amount_vs_emp_median` (fallback 1.0 when < MIN_GROUP_SIZE claims)
+- 1d `FEATURE_COLUMNS` (7 features) → `X`; correlation table
+- 2 `IsolationForest(n_estimators=200, contamination="auto",
+  random_state=SEED)`; `anomaly_score = -score_samples(X)`;
+  rerun-with-same-seed determinism check
+- 3 threshold = 90th percentile (`REVIEW_SHARE`); `scored_claims`;
+  top 10 inspected
+
+**Results**
+- `is_weekend` mean 0.14 (expected 0.29 under uniform days: generator
+  favors weekdays); `days_to_submit` median 16, max 120
+- `amount_vs_cat_median` max 10.64; `amount_z_in_cat` right-skewed
+  (median −0.23, max 4.32)
+- Personal baseline missing for 12% of claims; `claims_in_month`
+  median 8 (~33 claims per employee)
+- Correlation: amount cluster 0.77–0.93 (cat median / z / emp median);
+  `claims_in_month` vs `days_to_submit` −0.25, vs `is_weekend` −0.24
+- Scores 0.348–0.737, median 0.405; threshold 0.537 → 33 flagged
+- Top 10: 5 big Airfare, Home Office $1,196 (R-E001-05-L2), Meals
+  $179, R-E001-07-L3 (premium class) + 3 very late filings (96, 113,
+  120 days). Model mostly rediscovers what the rules catch
+
+**Errors and fixes**
+- `from expense_agent.data import GENERATED_DIR` → `expense_agent.paths`
+  (paths = locations, data = loaders)
+
+**Decisions**
+- Features in their own DataFrame; labels only from cell 4 on
+- `contamination="auto"`: 0.25 would leak the label rate
+- Threshold from review capacity (top 10%), not a magic score
+- No scaling: tree splits are scale-invariant
+- Keep all 7 features as baseline; test dropping one (ablation) in 4
+- Anomaly score = input to review, never an auto-deny ("rare" ≠
+  "against policy")
+- Project/product name: considering "ClaimGuard" (not decided;
+  package stays `expense_agent`)
+
+**Learned**
+- Null-model expectations: write a guess, investigate the gap
+- `groupby().transform()` (one value per row) vs `.agg()` (per group)
+- `.where(cond, other)`; mean of booleans = share True;
+  `.dt.to_period("M")`
+- Masking: outliers inflate mean/std and hide themselves → median/MAD
+  are robust
+- IsolationForest: short path length = anomaly; `score_samples` is
+  higher = more normal, so negate
+- Recall ceiling = flags / positives (33 / 82 = 40%)
+
+**Open items**
+- [ ] **Next: 04 cell 4a — evaluate vs labels.** Add `load_labels` to
+      cell 0 imports, then:
+      ```python
+      # 4a Evaluate against the answer key (labels enter here, never earlier)
+      LABEL_COLUMNS = ["claim_id", "in_policy", "violation_type"]
+
+      evaluated = scored_claims.merge(
+          load_labels(GENERATED_DIR)[LABEL_COLUMNS],
+          on="claim_id",
+          validate="one_to_one",
+      )
+      out_of_policy = ~evaluated["in_policy"]
+      flagged = evaluated["is_anomaly"]
+
+      base_rate = out_of_policy.mean()
+      precision = out_of_policy[flagged].mean()
+      recall = flagged[out_of_policy].mean()
+      max_recall = flagged.sum() / out_of_policy.sum()
+
+      assert len(evaluated) == len(scored_claims) == 330
+      print(f"base rate (random flagging): {base_rate:.1%}")
+      print(f"precision: {precision:.1%}  (lift {precision / base_rate:.1f}x)")
+      print(f"recall: {recall:.1%}  (ceiling at this capacity: {max_recall:.1%})")
+      ```
+      Expected: base rate 24.8%; precision ~55–75%; recall ~20–30%
+- [ ] Then 4b: recall by violation type; of the 23 claims rules miss
+      or only review (6 personal_extension, 17 prohibited_category),
+      how many does the model flag? 4c: ablation (drop one amount
+      feature). 5: MLflow run
+- [ ] Open question: why `claims_in_month` correlates negatively with
+      lateness and weekend
+- [ ] Reflect pending: 200 vs 100 trees (vary only the seed);
+      MIN_GROUP_SIZE 1 vs 10; which violation types the model will
+      miss (duplicate = copy of a normal claim)
+- [ ] Commit notebook 04 (and 03 re-run outputs)
+- [ ] Still open from Session 11: drift-test grep, cleanup commit,
+      E501 × 13, leftover files, carried-over items
+
+---
+
+### Session 12 — 2026-11-27 — 04 cells 4a–4g (evaluation, ablation, rules overlap)
+
+**Done**
+- 4a evaluate vs labels; 4b-1 recall by type; 4b-2 overlap with rules;
+  4b-3 false alarms vs rule decisions
+- 4c ablation harness `score_feature_set` (baseline row must reproduce 4a)
+- 4d seed check (20 seeds × 3 feature sets)
+- 4e rank only rule-approved claims; catch curve at budgets 5/10/20/33
+- 4f ranks of the 6 false approvals; 4g "weekend lodging" rule check
+
+**Results**
+- 4a: base rate 24.8%; precision 72.7% (2.9x lift); recall 29.3% (ceiling 40.2%)
+- 4b: premium_class 6/6, late 10/11, over_cap 6/16; missing_receipt,
+  personal_extension, split 0. Model adds 1 catch rules miss; 8 of 9
+  false alarms are rule-approved (Ground Transport ~$370, cheap Software)
+- 4c/4d: cat_median and emp_median redundant (identical rows); drop
+  log_amount = noise (23.4 vs 23.5 ± 0.8); "no amount" 4 new catches
+  on all 20 seeds; seed noise ≈ ±0.8 claims
+- 4e: 237 approved, 6 bad (2.5%). No-amount catches 4/6 at budget 10
+  (16x random); baseline 0/6 at 10
+- 4f: all 6 = personal_extension, Lodging, weekend, normal amounts
+- 4g: weekend-lodging rule flags 6 approved, catches 6/6 → generator
+  artifact (no legitimate weekend lodging exists)
+
+**Errors and fixes**
+- 4d capacity assert: tied scores flagged > 33 ("no amount": 172 of 330
+  claims share a feature row) → top-k by `argsort(kind="stable")`
+- KeyError 'grue_flags' → typo in METRICS
+
+**Decisions**
+- Evaluate the model where it runs: on rule-approved claims, not standalone
+- Capacity limits enforced by count, not by score cutoff
+- Ruff line-length 85 (was 79) (deba5d0)
+
+**Learned**
+- Standalone best ≠ best alongside rules
+- Ablation on the answer key = test-set selection; use for insight only
+- Ties: quantile threshold ≠ top-k when scores repeat
+- Boolean mask on index array: `order[approved[order]]`; inverse rank
+- A too-perfect result is a data-generation check
+
+**Open items**
+- [ ] **Decide: fix generator (legit weekend lodging) vs weekend-lodging
+      review rule vs both**
+- [ ] Decide feature set: keep 7 or drop log_amount + one median ratio
+- [ ] Seed check on the 4e catch curve
+- [ ] 5: MLflow run
+- [ ] Commit notebook 04 (+ 03 re-run outputs)
+- [x] E501 cleared at line-length 85 (c05e0b7); main.py removed (5093590)
+- [ ] Still open from Session 11: drift-test grep, cleanup commit,
+      leftover files (gitignore.txt, sessions_2.md), carried-over items
+
+---
+
+# Appendix — Full file contents
+Every file created in Session 1, so this document can rebuild the project on its own.
+
+### .env template
+Fill in your keys. Never commit this file.
+Save as: `.env`
+
+````bash
+OPENAI_API_KEY=
+ANTHROPIC_API_KEY=
+TYPESAFE_API_KEY=
+LANGFUSE_PUBLIC_KEY=
+LANGFUSE_SECRET_KEY=
+LANGFUSE_HOST=https://cloud.langfuse.com
+OPENAI_MODEL=
+ANTHROPIC_MODEL=
+````
+
+### .gitignore
+Save as: `.gitignore`
+
+````text
+.env
+.venv/
+__pycache__/
+.ipynb_checkpoints/
+mlruns/
+data/receipts/
+````
+
+### Expense policy (readable)
+Save as: `docs/expense_policy.md`
+
+````markdown
+# Techstack.io Travel & Expense Policy
+
+**Version:** 1.0  **Effective:** January 1, 2026  **Owner:** Finance (CFO)
+Numeric limits in this document mirror `config/policy.yaml`. If the two ever disagree, the YAML file is authoritative and this document must be updated.
+
+---
+
+## POL-1 General Rules
+
+**POL-1.1 Business purpose.** Every expense must have a specific business purpose: who, what, and why (e.g., "Dinner with Acme Corp CTO to discuss Q3 renewal"). Vague purposes such as "business," "meeting," or "misc" are sent to a human reviewer.
+
+**POL-1.2 Timely submission.** Expenses must be submitted within **60 days** of the expense date. Later submissions are denied.
+
+**POL-1.3 Receipts.** An itemized receipt is required for any expense over **$75.00**. Items over $75 without a receipt are denied.
+
+**POL-1.4 No duplicates.** An expense may be claimed only once. Claims matching an earlier claim (same employee, date, merchant, and amount) are denied.
+
+**POL-1.5 No splitting.** A single purchase may not be split across multiple claims to stay under a limit. Split claims are denied.
+
+## POL-2 Allowable Expenses and Limits
+
+| Ref | Category | Rule |
+|---|---|---|
+| POL-2.1 | **Airfare** | Economy or premium economy. Business class only for flights of **6+ hours** *and* with written pre-approval. First class is never reimbursed. |
+| POL-2.2 | **Lodging** | Up to **$250/night** in standard cities and **$350/night** in high-cost cities (New York, San Francisco, Boston, Seattle, Washington DC, Los Angeles). Only nights required for business. |
+| POL-2.3 | **Meals (travel)** | Traveler's own meals: up to **$75/day** while traveling overnight. |
+| POL-2.4 | **Client Meals** | Up to **$100 per person**. Must list attendees, company, and business purpose. Alcohol is allowed only as part of a client meal. |
+| POL-2.5 | **Ground Transport** | Rideshare, taxi, transit, parking, tolls. Rental cars: economy, compact, or mid-size. |
+| POL-2.6 | **Mileage** | Personal vehicle reimbursed at the IRS business rate: **$0.725/mile** (Jan 1–Jun 30, 2026) and **$0.76/mile** (from Jul 1, 2026). |
+| POL-2.7 | **Conferences & Training** | Up to **$2,000 per event**, with manager pre-approval. |
+| POL-2.8 | **Software** | Approved vendors only: GitHub, JetBrains, Figma, Notion, Zoom, Atlassian, Slack, OpenAI, Anthropic. Others need IT approval. |
+| POL-2.9 | **Home Office** | Equipment up to **$500 per purchase**. |
+| POL-2.10 | **Office Supplies** | Up to **$150 per purchase**. |
+
+## POL-3 Prohibited Expenses (always denied)
+
+- POL-3.1 Alcohol that is not part of a client entertainment meal
+- POL-3.2 Personal items, including electronics for personal use
+- POL-3.3 Gift cards or cash equivalents
+- POL-3.4 Traffic, parking, or other fines and penalties
+- POL-3.5 Travel costs for spouses, family members, or guests
+- POL-3.6 Spa, gym, in-room movies, or other personal entertainment
+- POL-3.7 Personal or weekend extensions of a business trip (lodging, meals, transport for non-business days)
+
+## POL-4 Decisions
+
+Every expense line receives one of three decisions:
+
+- **Approve:** within policy, with a clear business purpose.
+- **Deny:** violates POL-1 or POL-3, or exceeds a POL-2 limit. The denial must cite the policy section.
+- **Review:** routed to a human (see POL-5).
+
+## POL-5 Human Review (Escalation)
+
+An expense goes to a human reviewer if **any** of these apply:
+
+- POL-5.1 A single item is over **$1,000**.
+- POL-5.2 The amount is within **10% below** a category cap.
+- POL-5.3 The business purpose is vague or missing.
+- POL-5.4 The merchant does not match the stated category.
+- POL-5.5 The AI reviewer's confidence is below **0.75**.
+- POL-5.6 The primary AI reviewer and the verifier model disagree.
+- POL-5.7 Anomaly detection flags the claim as unusual for that employee.
+
+**Approval tiers:**
+- Tier 1: the employee's manager.
+- Tier 2: Finance, for items over $1,000, or when a manager approves against the AI recommendation.
+
+## POL-6 Audit
+
+All decisions, including AI rationale, model versions, and human overrides, are logged and retained for audit.
+````
+
+### Expense policy (config)
+Save as: `config/policy.yaml`
+
+````yaml
+# Techstack.io Expense Policy — machine-readable config (v1.0)
+# Single source of truth for all numeric limits. docs/expense_policy.md describes the same rules in prose.
+version: "1.0"
+effective_date: "2026-01-01"
+currency: USD
+
+submission:
+  max_days_after_expense: 60          # POL-1.2
+  receipt_required_over: 75.00        # POL-1.3
+
+escalation:                           # POL-5
+  high_value_threshold: 1000.00       # single item above this -> human review
+  near_cap_pct: 0.10                  # within 10% below a cap -> human review
+  min_agent_confidence: 0.75          # below this -> human review
+  finance_review_threshold: 1000.00   # tier-2 (Finance) after manager
+
+city_tiers:
+  high_cost: ["New York, NY", "San Francisco, CA", "Boston, MA", "Seattle, WA", "Washington, DC", "Los Angeles, CA"]
+  # every other city is "standard"
+
+categories:
+  Airfare:                            # POL-2.1
+    allowed_fare_classes: ["Economy", "Premium Economy"]
+    business_class_min_flight_hours: 6
+    business_class_requires_preapproval: true
+  Lodging:                            # POL-2.2
+    nightly_cap:
+      standard: 250.00
+      high_cost: 350.00
+  Meals:                              # POL-2.3 (traveler's own meals, per day)
+    daily_per_diem: 75.00
+  Client Meals:                       # POL-2.4
+    per_person_cap: 100.00
+    requires_attendees: true
+  Ground Transport:                   # POL-2.5
+    allowed_rental_classes: ["Economy", "Compact", "Mid-size"]
+  Mileage:                            # POL-2.6 (IRS business rate, date-dependent)
+    rates:
+      - {from: "2026-01-01", to: "2026-06-30", rate: 0.725}
+      - {from: "2026-07-01", to: "2026-12-31", rate: 0.76}
+  Conference:                         # POL-2.7
+    per_event_cap: 2000.00
+    requires_preapproval: true
+  Software:                           # POL-2.8
+    approved_vendors: ["GitHub", "JetBrains", "Figma", "Notion", "Zoom", "Atlassian", "Slack", "OpenAI", "Anthropic"]
+  Home Office:                        # POL-2.9
+    per_purchase_cap: 500.00
+  Office Supplies:                    # POL-2.10
+    per_purchase_cap: 150.00
+
+prohibited:                           # POL-3
+  - {code: ALCOHOL_NO_CLIENT, text: "Alcohol not part of a client entertainment meal"}
+  - {code: PERSONAL_ITEM,     text: "Personal items, including electronics for personal use"}
+  - {code: GIFT_CARD,         text: "Gift cards or cash equivalents"}
+  - {code: FINE,              text: "Traffic, parking, or other fines and penalties"}
+  - {code: FAMILY_TRAVEL,     text: "Travel costs for spouses, family, or guests"}
+  - {code: WELLNESS_ENTERTAINMENT, text: "Spa, gym, in-room movies, personal entertainment"}
+
+violation_codes:                      # labels used in ground truth + rules engine
+  over_cap: "Amount exceeds the category limit"
+  prohibited_category: "Expense type is prohibited (POL-3)"
+  missing_receipt: "No receipt for an item over the receipt threshold"
+  late_submission: "Submitted more than 60 days after the expense date"
+  duplicate: "Same employee, date, merchant and amount already claimed"
+  split_transaction: "Purchase split across claims to stay under a cap"
+  personal_extension: "Personal / weekend extension of a business trip"
+  premium_class: "Business/first class without meeting policy conditions"
+````
+
+### Employees
+Save as: `data/raw/employees.csv`
+
+````csv
+employee_id,employee_name,title,department,home_city,manager_id
+E001,Priya Raman,Director of Engineering,Engineering,"Austin, TX",E010
+E002,Kevin Ortiz,Senior Software Engineer,Engineering,"Austin, TX",E001
+E003,Lena Brooks,ML Engineer,Engineering,"Denver, CO",E001
+E004,Dana Whitfield,VP of Sales,Sales,"Chicago, IL",E010
+E005,Jamal Carter,Account Executive,Sales,"Dallas, TX",E004
+E006,Sofia Nguyen,Account Executive,Sales,"San Francisco, CA",E004
+E007,Ethan Kim,Marketing Manager,Marketing,"New York, NY",E010
+E008,Rachel Adler,Content Strategist,Marketing,"Seattle, WA",E007
+E009,Tom Becker,Operations Manager,Operations,"San Antonio, TX",E010
+E010,Marcus Hale,Chief Financial Officer,Finance,"San Antonio, TX",BOARD
+````
+
+### Large data files (not embedded)
+`expense_reports.csv`, `expense_reports.xlsx`, `expense_reports.json` and `ground_truth_labels.csv` are too large to paste here. Save them from the chat downloads into `data/raw/`. If they're lost, rerun the reference generator below; it reproduces them exactly (seed 42):
+```bash
+uv run python scripts/generate_reference_data.py
+uv run python scripts/validate.py
+```
+
+## Answer key — try notebook 01 before reading this
+This is the reference code that produced the dataset. Build your own generator in `01_generate_data.ipynb` first, then compare.
+
+### Reference data generator
+Save as: `scripts/generate_reference_data.py`
+
+````python
+"""Reference generator for Techstack.io synthetic expense data.
+
+Produces the answer-key dataset Michael's notebook 01 will be checked against.
+Seeded for reproducibility. Reads limits from config/policy.yaml.
+"""
+
+from __future__ import annotations
+
+import json
+import random
+from datetime import date, timedelta
+from pathlib import Path
+
+import pandas as pd
+import yaml
+
+ROOT = Path(__file__).resolve().parents[1]
+SEED = 42
+OUT_OF_POLICY_RATE = 0.25
+BORDERLINE_RATE = 0.05
+WINDOW_START, WINDOW_END = date(2026, 5, 1), date(2026, 10, 31)
+TODAY = date(2026, 11, 12)
+
+rng = random.Random(SEED)
+policy = yaml.safe_load((ROOT / "config/policy.yaml").read_text())
+CAT = policy["categories"]
+HIGH_COST = set(policy["city_tiers"]["high_cost"])
+
+# ---------------------------------------------------------------- employees
+EMPLOYEES = [
+    # id,   name,            title,                       dept,          home city,           manager
+    (
+        "E001",
+        "Priya Raman",
+        "Director of Engineering",
+        "Engineering",
+        "Austin, TX",
+        "E010",
+    ),
+    (
+        "E002",
+        "Kevin Ortiz",
+        "Senior Software Engineer",
+        "Engineering",
+        "Austin, TX",
+        "E001",
+    ),
+    (
+        "E003",
+        "Lena Brooks",
+        "ML Engineer",
+        "Engineering",
+        "Denver, CO",
+        "E001",
+    ),
+    ("E004", "Dana Whitfield", "VP of Sales", "Sales", "Chicago, IL", "E010"),
+    (
+        "E005",
+        "Jamal Carter",
+        "Account Executive",
+        "Sales",
+        "Dallas, TX",
+        "E004",
+    ),
+    (
+        "E006",
+        "Sofia Nguyen",
+        "Account Executive",
+        "Sales",
+        "San Francisco, CA",
+        "E004",
+    ),
+    (
+        "E007",
+        "Ethan Kim",
+        "Marketing Manager",
+        "Marketing",
+        "New York, NY",
+        "E010",
+    ),
+    (
+        "E008",
+        "Rachel Adler",
+        "Content Strategist",
+        "Marketing",
+        "Seattle, WA",
+        "E007",
+    ),
+    (
+        "E009",
+        "Tom Becker",
+        "Operations Manager",
+        "Operations",
+        "San Antonio, TX",
+        "E010",
+    ),
+    (
+        "E010",
+        "Marcus Hale",
+        "Chief Financial Officer",
+        "Finance",
+        "San Antonio, TX",
+        "BOARD",
+    ),
+]
+TRAVEL_PROB = {
+    "Sales": 0.7,
+    "Marketing": 0.5,
+    "Engineering": 0.3,
+    "Operations": 0.4,
+    "Finance": 0.3,
+}
+
+CITIES = [
+    "New York, NY",
+    "San Francisco, CA",
+    "Boston, MA",
+    "Seattle, WA",
+    "Washington, DC",
+    "Los Angeles, CA",
+    "Austin, TX",
+    "Dallas, TX",
+    "Chicago, IL",
+    "Denver, CO",
+    "Atlanta, GA",
+    "Phoenix, AZ",
+    "Nashville, TN",
+    "San Antonio, TX",
+]
+CLIENTS = [
+    "Acme Corp",
+    "Globex",
+    "Initech",
+    "Umbrella Health",
+    "Stark Logistics",
+    "Wayne Financial",
+    "Hooli",
+    "Vandelay Industries",
+    "Soylent Foods",
+    "Cyberdyne Systems",
+]
+CLIENT_PEOPLE = [
+    "Alex Morgan",
+    "Jordan Lee",
+    "Taylor Reed",
+    "Casey Patel",
+    "Riley Chen",
+    "Morgan Diaz",
+    "Avery Shah",
+    "Quinn Foster",
+    "Drew Kowalski",
+    "Jamie Ito",
+]
+CONFERENCES = [
+    "AWS re:Invent",
+    "SaaStr Annual",
+    "Data + AI Summit",
+    "Dreamforce",
+    "Content Marketing World",
+    "PyData Global",
+    "Gartner Data & Analytics Summit",
+]
+MERCHANTS = {
+    "Airfare": [
+        "Delta Air Lines",
+        "United Airlines",
+        "American Airlines",
+        "Southwest Airlines",
+        "Alaska Airlines",
+    ],
+    "Lodging": [
+        "Marriott",
+        "Hilton",
+        "Hyatt",
+        "Courtyard by Marriott",
+        "Hampton Inn",
+        "Westin",
+    ],
+    "Meals": [
+        "Starbucks",
+        "Panera Bread",
+        "Chipotle",
+        "Hotel Restaurant",
+        "Sweetgreen",
+        "Local Diner",
+    ],
+    "Client Meals": [
+        "Capital Grille",
+        "Ruth's Chris Steak House",
+        "Fogo de Chao",
+        "Eddie V's",
+        "Nobu",
+        "The Mercer Kitchen",
+    ],
+    "Ground Transport": [
+        "Uber",
+        "Lyft",
+        "Yellow Cab",
+        "Enterprise Rent-A-Car",
+        "Hertz",
+        "Airport Parking",
+    ],
+    "Conference": ["Conference Registration"],  # replaced by event name
+    "Software": policy["categories"]["Software"]["approved_vendors"],
+    "Home Office": ["Amazon", "Best Buy", "IKEA", "Staples", "Apple Store"],
+    "Office Supplies": ["Staples", "Office Depot", "Amazon", "Target"],
+}
+HOME_OFFICE_ITEMS = [
+    "External monitor",
+    "Ergonomic chair",
+    "Standing desk converter",
+    "Docking station",
+    "Webcam and headset",
+    "Keyboard and mouse",
+]
+SUPPLY_ITEMS = [
+    "Notebooks and pens",
+    "Printer ink",
+    "Whiteboard markers",
+    "Shipping supplies",
+    "Desk organizers",
+]
+
+
+def money(x: float) -> float:
+    return round(x, 2)
+
+
+def rand_date(start: date, end: date) -> date:
+    return start + timedelta(days=rng.randint(0, (end - start).days))
+
+
+def tier(city: str) -> str:
+    return "high_cost" if city in HIGH_COST else "standard"
+
+
+def mileage_rate(d: date) -> float:
+    for r in CAT["Mileage"]["rates"]:
+        if date.fromisoformat(r["from"]) <= d <= date.fromisoformat(r["to"]):
+            return r["rate"]
+    raise ValueError(d)
+
+
+def blank(category: str, d: date, city: str) -> dict:
+    return dict(
+        expense_date=d,
+        category=category,
+        merchant="",
+        description="",
+        business_purpose="",
+        amount=0.0,
+        city=city,
+        nights=None,
+        attendees=None,
+        attendee_names="",
+        fare_class="",
+        flight_hours=None,
+        rental_class="",
+        miles=None,
+        preapproved=False,
+        receipt_attached=True,
+    )
+
+
+# ------------------------------------------------- clean (in-policy) line items
+# Clean amounts stay below 90% of any cap so they never look "near cap".
+def clean_item(
+    category: str, d: date, city: str, purpose: str, nights: int = 1
+) -> dict:
+    c = blank(category, d, city)
+    c["business_purpose"] = purpose
+    if category == "Airfare":
+        c.update(
+            merchant=rng.choice(MERCHANTS["Airfare"]),
+            fare_class="Economy",
+            flight_hours=round(rng.uniform(1.2, 4.8), 1),
+            amount=money(rng.uniform(180, 650)),
+            description=f"Round-trip economy airfare to {city}",
+        )
+    elif category == "Lodging":
+        cap = CAT["Lodging"]["nightly_cap"][tier(city)]
+        nightly = rng.uniform(0.55 * cap, 0.89 * cap)
+        c.update(
+            merchant=rng.choice(MERCHANTS["Lodging"]),
+            nights=nights,
+            amount=money(nightly * nights),
+            description=f"Hotel, {nights} night(s) at ${nightly:,.2f}/night",
+        )
+    elif category == "Meals":
+        c.update(
+            merchant=rng.choice(MERCHANTS["Meals"]),
+            amount=money(
+                rng.uniform(18, 0.89 * CAT["Meals"]["daily_per_diem"])
+            ),
+            description="Traveler meals for the day",
+        )
+    elif category == "Client Meals":
+        n = rng.randint(2, 5)
+        client = rng.choice(CLIENTS)
+        names = rng.sample(CLIENT_PEOPLE, n - 1)
+        pp = rng.uniform(35, 0.89 * CAT["Client Meals"]["per_person_cap"])
+        c.update(
+            merchant=rng.choice(MERCHANTS["Client Meals"]),
+            attendees=n,
+            attendee_names="; ".join(f"{p} ({client})" for p in names)
+            + "; employee",
+            amount=money(pp * n),
+            description=f"Client dinner with {client}, {n} attendees",
+        )
+        c["business_purpose"] = (
+            f"Dinner with {client} team to discuss {rng.choice(['renewal', 'expansion', 'pilot results', 'Q4 roadmap', 'contract terms'])}"
+        )
+    elif category == "Ground Transport":
+        if rng.random() < 0.25:
+            rc = rng.choice(CAT["Ground Transport"]["allowed_rental_classes"])
+            c.update(
+                merchant=rng.choice(["Enterprise Rent-A-Car", "Hertz"]),
+                rental_class=rc,
+                amount=money(rng.uniform(120, 380)),
+                description=f"{rc} rental car",
+            )
+        else:
+            c.update(
+                merchant=rng.choice(
+                    ["Uber", "Lyft", "Yellow Cab", "Airport Parking"]
+                ),
+                amount=money(rng.uniform(12, 85)),
+                description="Ride to client site / airport",
+            )
+    elif category == "Mileage":
+        miles = rng.randint(20, 180)
+        c.update(
+            merchant="Personal vehicle",
+            miles=miles,
+            amount=money(miles * mileage_rate(d)),
+            description=f"{miles} business miles at ${mileage_rate(d)}/mile",
+            receipt_attached=False,
+        )
+    elif category == "Conference":
+        conf = rng.choice(CONFERENCES)
+        c.update(
+            merchant=conf,
+            preapproved=True,
+            amount=money(
+                rng.uniform(300, 0.89 * CAT["Conference"]["per_event_cap"])
+            ),
+            description=f"{conf} registration",
+        )
+        c["business_purpose"] = (
+            f"Attend {conf} for training and customer networking"
+        )
+    elif category == "Software":
+        v = rng.choice(MERCHANTS["Software"])
+        c.update(
+            merchant=v,
+            amount=money(rng.uniform(10, 300)),
+            description=f"{v} monthly subscription",
+        )
+    elif category == "Home Office":
+        item = rng.choice(HOME_OFFICE_ITEMS)
+        c.update(
+            merchant=rng.choice(MERCHANTS["Home Office"]),
+            amount=money(
+                rng.uniform(40, 0.89 * CAT["Home Office"]["per_purchase_cap"])
+            ),
+            description=item,
+        )
+    elif category == "Office Supplies":
+        c.update(
+            merchant=rng.choice(MERCHANTS["Office Supplies"]),
+            amount=money(
+                rng.uniform(
+                    8, 0.89 * CAT["Office Supplies"]["per_purchase_cap"]
+                )
+            ),
+            description=rng.choice(SUPPLY_ITEMS),
+        )
+    # receipts: always for > threshold, mostly for small items
+    thr = policy["submission"]["receipt_required_over"]
+    if category != "Mileage":
+        c["receipt_attached"] = (
+            True if c["amount"] > thr else rng.random() < 0.8
+        )
+    return c
+
+
+# --------------------------------------------------------------- reports
+def build_reports():
+    reports, claims = [], []
+    for emp_id, name, title, dept, home, mgr in EMPLOYEES:
+        for r in range(1, 11):
+            report_id = f"R-{emp_id}-{r:02d}"
+            travel = rng.random() < TRAVEL_PROB[dept]
+            items: list[dict] = []
+            if travel:
+                dest = rng.choice([c for c in CITIES if c != home])
+                start = rand_date(
+                    WINDOW_START, WINDOW_END - timedelta(days=40)
+                )
+                while (
+                    start.weekday() > 2
+                ):  # trips start Mon–Wed so they end on weekdays
+                    start += timedelta(days=1)
+                nights = rng.randint(1, 3)
+                end = start + timedelta(days=nights)
+                is_conf = (
+                    dept in ("Engineering", "Marketing") and rng.random() < 0.4
+                )
+                client = rng.choice(CLIENTS)
+                purpose = (
+                    f"Attend conference in {dest}"
+                    if is_conf
+                    else f"On-site visit with {client} in {dest}"
+                )
+                title_txt = purpose
+                items.append(clean_item("Airfare", start, dest, purpose))
+                items.append(
+                    clean_item("Lodging", start, dest, purpose, nights=nights)
+                )
+                if is_conf:
+                    items.append(
+                        clean_item("Conference", start, dest, purpose)
+                    )
+                for k in range(rng.randint(0, 2)):
+                    items.append(
+                        clean_item(
+                            "Meals",
+                            start + timedelta(days=min(k, nights)),
+                            dest,
+                            purpose,
+                        )
+                    )
+                if dept == "Sales" and rng.random() < 0.7:
+                    items.append(
+                        clean_item(
+                            "Client Meals",
+                            start + timedelta(days=rng.randint(0, nights)),
+                            dest,
+                            purpose,
+                        )
+                    )
+                if rng.random() < 0.5:
+                    items.append(
+                        clean_item("Ground Transport", start, dest, purpose)
+                    )
+                items = items[:5]
+                last = end
+            else:
+                month_end = rand_date(
+                    WINDOW_START + timedelta(days=25), WINDOW_END
+                )
+                title_txt = f"Local expenses through {month_end:%b %d, %Y}"
+                pool = {
+                    "Sales": [
+                        "Client Meals",
+                        "Client Meals",
+                        "Mileage",
+                        "Ground Transport",
+                        "Office Supplies",
+                    ],
+                    "Marketing": [
+                        "Software",
+                        "Client Meals",
+                        "Office Supplies",
+                        "Home Office",
+                        "Mileage",
+                    ],
+                    "Engineering": [
+                        "Software",
+                        "Software",
+                        "Home Office",
+                        "Office Supplies",
+                    ],
+                    "Operations": [
+                        "Mileage",
+                        "Office Supplies",
+                        "Home Office",
+                        "Ground Transport",
+                    ],
+                    "Finance": [
+                        "Software",
+                        "Office Supplies",
+                        "Mileage",
+                        "Client Meals",
+                    ],
+                }[dept]
+                for _ in range(rng.randint(1, 4)):
+                    cat = rng.choice(pool)
+                    d = month_end - timedelta(days=rng.randint(0, 25))
+                    purpose = {
+                        "Client Meals": "",  # set inside clean_item
+                        "Mileage": f"Drive to {rng.choice(CLIENTS)} office for meeting",
+                        "Software": "Tool required for daily work",
+                        "Home Office": "Remote work setup",
+                        "Office Supplies": "Team office supplies",
+                        "Ground Transport": f"Rideshare to {rng.choice(CLIENTS)} meeting",
+                    }[cat]
+                    items.append(clean_item(cat, d, home, purpose))
+                last = max(i["expense_date"] for i in items)
+            submitted = min(last + timedelta(days=rng.randint(2, 20)), TODAY)
+            reports.append(
+                dict(
+                    report_id=report_id,
+                    employee_id=emp_id,
+                    report_title=title_txt,
+                    report_type="travel" if travel else "local",
+                    submitted_date=submitted,
+                )
+            )
+            for n, it in enumerate(items, 1):
+                it.update(
+                    report_id=report_id,
+                    employee_id=emp_id,
+                    line_no=n,
+                    claim_id=f"{report_id}-L{n}",
+                    submitted_date=submitted,
+                    in_policy=True,
+                    violation_type="",
+                    expected_decision="approve",
+                    review_reason="",
+                    is_borderline=False,
+                    label_note="",
+                )
+                claims.append(it)
+    return reports, claims
+
+
+# -------------------------------------------------------- violation injectors
+PROHIBITED_TEMPLATES = [
+    (
+        "Meals",
+        "Pinstripe Bar & Lounge",
+        "Drinks with coworkers after work, no clients present",
+        "ALCOHOL_NO_CLIENT",
+        (45, 160),
+    ),
+    (
+        "Home Office",
+        "Best Buy",
+        "AirPods Pro for personal commute",
+        "PERSONAL_ITEM",
+        (180, 260),
+    ),
+    (
+        "Ground Transport",
+        "City Parking Enforcement",
+        "Parking ticket near client office",
+        "FINE",
+        (40, 120),
+    ),
+    (
+        "Lodging",
+        "Hotel Spa",
+        "Spa massage during trip",
+        "WELLNESS_ENTERTAINMENT",
+        (90, 220),
+    ),
+    (
+        "Lodging",
+        "Marriott",
+        "In-room movies",
+        "WELLNESS_ENTERTAINMENT",
+        (18, 40),
+    ),
+    (
+        "Airfare",
+        "Delta Air Lines",
+        "Airfare for spouse to join trip",
+        "FAMILY_TRAVEL",
+        (220, 560),
+    ),
+    (
+        "Office Supplies",
+        "Amazon",
+        "Amazon gift card for team member birthday",
+        "GIFT_CARD",
+        (50, 100),
+    ),
+]
+WEIGHTS = {
+    "over_cap": 0.22,
+    "prohibited_category": 0.20,
+    "missing_receipt": 0.14,
+    "late_submission": 0.12,
+    "duplicate": 0.10,
+    "split_transaction": 0.07,
+    "personal_extension": 0.08,
+    "premium_class": 0.07,
+}
+
+
+def replace(c: dict, new: dict) -> None:
+    keep = {
+        k: c[k]
+        for k in (
+            "report_id",
+            "employee_id",
+            "line_no",
+            "claim_id",
+            "submitted_date",
+        )
+    }
+    c.clear()
+    c.update(new)
+    c.update(keep)
+
+
+def inject(claims: list[dict], reports: dict) -> None:
+    n = len(claims)
+    k = round(OUT_OF_POLICY_RATE * n)
+    selected = set(rng.sample(range(n), k))
+    locked: set[int] = set()  # partners for duplicate/split — must stay clean
+    by_report: dict[str, list[int]] = {}
+    for i, c in enumerate(claims):
+        by_report.setdefault(c["report_id"], []).append(i)
+
+    for i in sorted(selected):
+        c = claims[i]
+        rep = reports[c["report_id"]]
+        partners = [
+            j
+            for j in by_report[c["report_id"]]
+            if j != i and j not in selected and j not in locked
+        ]
+        options = dict(WEIGHTS)
+        if rep["report_type"] != "travel":
+            options.pop("personal_extension")
+            options.pop("premium_class")
+        earlier = [
+            j for j in partners if j < i
+        ]  # a duplicate always copies an EARLIER line
+        if not earlier:
+            options.pop("duplicate", None)
+        if not partners:
+            options.pop("split_transaction", None)
+        if rep["report_type"] == "travel":
+            options.pop("split_transaction", None)
+        vtype = rng.choices(list(options), weights=list(options.values()))[0]
+        d, city, purpose = (
+            c["expense_date"],
+            c["city"],
+            c["business_purpose"] or rep["report_title"],
+        )
+        note = ""
+
+        if vtype == "over_cap":
+            cats = (
+                ["Lodging", "Meals", "Client Meals", "Conference"]
+                if rep["report_type"] == "travel"
+                else ["Client Meals", "Home Office", "Office Supplies"]
+            )
+            cat = rng.choice(cats)
+            new = clean_item(
+                cat, d, city, purpose, nights=c.get("nights") or 2
+            )
+            if cat == "Lodging":
+                cap = CAT["Lodging"]["nightly_cap"][tier(city)]
+                nightly = cap * rng.uniform(1.15, 1.6)
+                new["amount"] = money(nightly * new["nights"])
+                new["description"] = (
+                    f"Hotel, {new['nights']} night(s) at ${nightly:,.2f}/night"
+                )
+                note = f"nightly ${nightly:,.2f} > cap ${cap}"
+            elif cat == "Meals":
+                new["amount"] = money(
+                    CAT["Meals"]["daily_per_diem"] * rng.uniform(1.3, 2.4)
+                )
+                note = f"daily meals ${new['amount']} > ${CAT['Meals']['daily_per_diem']}"
+            elif cat == "Client Meals":
+                pp = CAT["Client Meals"]["per_person_cap"] * rng.uniform(
+                    1.2, 1.9
+                )
+                new["amount"] = money(pp * new["attendees"])
+                note = f"per person ${pp:,.2f} > ${CAT['Client Meals']['per_person_cap']}"
+            elif cat == "Conference":
+                new["amount"] = money(
+                    CAT["Conference"]["per_event_cap"] * rng.uniform(1.1, 1.6)
+                )
+                note = f"${new['amount']} > event cap ${CAT['Conference']['per_event_cap']}"
+            elif cat == "Home Office":
+                new["amount"] = money(
+                    CAT["Home Office"]["per_purchase_cap"]
+                    * rng.uniform(1.2, 2.5)
+                )
+                new["description"] = rng.choice(
+                    [
+                        "Premium ergonomic chair",
+                        "Ultrawide 49-inch monitor",
+                        "Motorized standing desk",
+                    ]
+                )
+                note = f"${new['amount']} > ${CAT['Home Office']['per_purchase_cap']}"
+            else:
+                new["amount"] = money(
+                    CAT["Office Supplies"]["per_purchase_cap"]
+                    * rng.uniform(1.3, 2.5)
+                )
+                note = f"${new['amount']} > ${CAT['Office Supplies']['per_purchase_cap']}"
+            new["receipt_attached"] = True
+
+        elif vtype == "prohibited_category":
+            cat, merch, desc, code, (lo, hi) = rng.choice(PROHIBITED_TEMPLATES)
+            new = blank(cat, d, city)
+            new.update(
+                merchant=merch,
+                description=desc,
+                business_purpose=purpose,
+                amount=money(rng.uniform(lo, hi)),
+                receipt_attached=True,
+            )
+            if cat == "Airfare":
+                new.update(
+                    fare_class="Economy",
+                    flight_hours=round(rng.uniform(1.5, 4.5), 1),
+                )
+            note = code
+
+        elif vtype == "missing_receipt":
+            new = dict(c)
+            if new["category"] == "Mileage" or new["amount"] <= 75:
+                new = clean_item(
+                    rng.choice(
+                        ["Client Meals", "Home Office", "Conference"]
+                        if rep["report_type"] == "local"
+                        else ["Lodging", "Airfare"]
+                    ),
+                    d,
+                    city,
+                    purpose,
+                    nights=2,
+                )
+                if new["category"] == "Conference":
+                    new["preapproved"] = True
+            new["receipt_attached"] = False
+            note = f"${new['amount']} with no receipt"
+
+        elif vtype == "late_submission":
+            new = dict(c)
+            days_late = rng.randint(65, 120)
+            new["expense_date"] = c["submitted_date"] - timedelta(
+                days=days_late
+            )
+            new["description"] = (
+                new["description"] + " (missed in earlier report)"
+            )
+            if new["category"] == "Mileage":
+                new["amount"] = money(
+                    new["miles"] * mileage_rate(new["expense_date"])
+                )
+                new["description"] = (
+                    f"{new['miles']} business miles at ${mileage_rate(new['expense_date'])}/mile (missed in earlier report)"
+                )
+            note = f"submitted {days_late} days after expense"
+
+        elif vtype == "duplicate":
+            j = rng.choice(earlier)
+            locked.add(j)
+            new = {k: v for k, v in claims[j].items()}
+            note = f"duplicate of {claims[j]['claim_id']}"
+
+        elif vtype == "split_transaction":
+            j = rng.choice(partners)
+            locked.add(j)
+            cap = CAT["Home Office"]["per_purchase_cap"]
+            a1 = money(rng.uniform(300, 0.86 * cap))
+            a2 = money(rng.uniform(max(cap + 40 - a1, 150), 0.86 * cap))
+            merch = rng.choice(["Amazon", "Best Buy", "IKEA"])
+            item = rng.choice(
+                [
+                    "Motorized standing desk",
+                    "Dual monitor setup",
+                    "Ergonomic workstation bundle",
+                ]
+            )
+            p = blank("Home Office", d, city)
+            p.update(
+                merchant=merch,
+                description=f"{item} (part 1 of 2)",
+                business_purpose="Remote work setup",
+                amount=a1,
+                receipt_attached=True,
+            )
+            replace(claims[j], p)
+            claims[j].update(
+                in_policy=True,
+                violation_type="",
+                expected_decision="approve",
+                review_reason="",
+                is_borderline=False,
+                label_note="",
+            )
+            new = dict(p)
+            new.update(description=f"{item} (part 2 of 2)", amount=a2)
+            note = f"split with {claims[j]['claim_id']}: total ${a1 + a2:,.2f} > ${cap}"
+
+        elif vtype == "personal_extension":
+            sat = d
+            while sat.weekday() != 5:
+                sat += timedelta(days=1)
+            new = clean_item("Lodging", sat, city, purpose, nights=2)
+            new["description"] = (
+                "Hotel, stayed Sat–Sun after trip ended to see the city"
+            )
+            new["business_purpose"] = "Extended stay"
+            note = "weekend nights after business trip"
+
+        else:  # premium_class
+            new = blank("Airfare", d, city)
+            if rng.random() < 0.5:
+                new.update(
+                    fare_class="Business",
+                    flight_hours=round(rng.uniform(2.0, 5.5), 1),
+                    preapproved=True,
+                )
+                note = (
+                    f"business class on {new['flight_hours']}h flight (< 6h)"
+                )
+            else:
+                new.update(
+                    fare_class=rng.choice(["Business", "First"]),
+                    flight_hours=round(rng.uniform(6.5, 11), 1),
+                    preapproved=False,
+                )
+                note = (
+                    f"{new['fare_class']} class without pre-approval"
+                    if new["fare_class"] == "Business"
+                    else "first class is never reimbursed"
+                )
+            new.update(
+                merchant=rng.choice(MERCHANTS["Airfare"]),
+                amount=money(rng.uniform(1200, 4800)),
+                description=f"Round-trip {new['fare_class'].lower()}-class airfare to {city}",
+                business_purpose=purpose,
+                receipt_attached=True,
+            )
+
+        replace(c, new)
+        c.update(
+            in_policy=False,
+            violation_type=vtype,
+            expected_decision="deny",
+            review_reason="",
+            is_borderline=False,
+            label_note=note,
+        )
+
+    # ---------------------------------------------------- borderline (human review)
+    clean_idx = [
+        i for i, c in enumerate(claims) if c["in_policy"] and i not in locked
+    ]
+    for i in rng.sample(clean_idx, round(BORDERLINE_RATE * n)):
+        c = claims[i]
+        caps = {
+            "Meals": CAT["Meals"]["daily_per_diem"],
+            "Home Office": CAT["Home Office"]["per_purchase_cap"],
+            "Office Supplies": CAT["Office Supplies"]["per_purchase_cap"],
+        }
+        if c["category"] in caps and rng.random() < 0.6:
+            c["amount"] = money(caps[c["category"]] * rng.uniform(0.92, 0.995))
+            c["receipt_attached"] = True
+            reason, note = (
+                "near_cap",
+                f"${c['amount']} within 10% of ${caps[c['category']]}",
+            )
+        elif c["category"] == "Lodging" and rng.random() < 0.6:
+            cap = CAT["Lodging"]["nightly_cap"][tier(c["city"])]
+            nightly = cap * rng.uniform(0.92, 0.995)
+            c["amount"] = money(nightly * c["nights"])
+            c["description"] = (
+                f"Hotel, {c['nights']} night(s) at ${nightly:,.2f}/night"
+            )
+            reason, note = (
+                "near_cap",
+                f"nightly ${nightly:,.2f} within 10% of ${cap}",
+            )
+        else:
+            c["business_purpose"] = rng.choice(
+                ["Business", "Meeting", "Misc", "Work stuff", "Team"]
+            )
+            reason, note = "vague_purpose", "business purpose too vague"
+        c.update(
+            is_borderline=True,
+            expected_decision="review",
+            review_reason=reason,
+            label_note=note,
+        )
+
+    # high-value in-policy items -> review (POL-5.1)
+    thr = policy["escalation"]["high_value_threshold"]
+    for c in claims:
+        if (
+            c["in_policy"]
+            and c["amount"] > thr
+            and c["expected_decision"] == "approve"
+        ):
+            c.update(
+                expected_decision="review",
+                review_reason="high_value",
+                label_note=f"${c['amount']:,.2f} > ${thr:,.0f}",
+            )
+
+
+# ----------------------------------------------------------------- export
+IMPORT_COLS = [
+    "report_id",
+    "employee_id",
+    "employee_name",
+    "department",
+    "manager_id",
+    "report_title",
+    "submitted_date",
+    "claim_id",
+    "line_no",
+    "expense_date",
+    "category",
+    "merchant",
+    "description",
+    "business_purpose",
+    "amount",
+    "currency",
+    "city",
+    "nights",
+    "attendees",
+    "attendee_names",
+    "fare_class",
+    "flight_hours",
+    "rental_class",
+    "miles",
+    "preapproved",
+    "receipt_attached",
+]
+LABEL_COLS = [
+    "claim_id",
+    "in_policy",
+    "violation_type",
+    "expected_decision",
+    "review_reason",
+    "is_borderline",
+    "label_note",
+]
+
+
+def main() -> None:
+    reports, claims = build_reports()
+    rep_by_id = {r["report_id"]: r for r in reports}
+    inject(claims, rep_by_id)
+
+    emp = pd.DataFrame(
+        EMPLOYEES,
+        columns=[
+            "employee_id",
+            "employee_name",
+            "title",
+            "department",
+            "home_city",
+            "manager_id",
+        ],
+    )
+    df = pd.DataFrame(claims).merge(
+        emp[["employee_id", "employee_name", "department", "manager_id"]],
+        on="employee_id",
+    )
+    df["report_title"] = df["report_id"].map(
+        lambda r: rep_by_id[r]["report_title"]
+    )
+    df["currency"] = "USD"
+    for col in ("expense_date", "submitted_date"):
+        df[col] = pd.to_datetime(df[col]).dt.date.astype(str)
+    for col in ("nights", "attendees", "miles"):
+        df[col] = df[col].astype("Int64")
+    df = df.sort_values(["report_id", "line_no"]).reset_index(drop=True)
+
+    out = ROOT / "data/raw"
+    out.mkdir(parents=True, exist_ok=True)
+    emp.to_csv(out / "employees.csv", index=False)
+    imp = df[IMPORT_COLS]
+    imp.to_csv(out / "expense_reports.csv", index=False)
+    imp.to_excel(
+        out / "expense_reports.xlsx", index=False, sheet_name="claims"
+    )
+    df[LABEL_COLS].to_csv(out / "ground_truth_labels.csv", index=False)
+
+    # JSON: nested reports -> line_items (the shape an API/app upload would use)
+    nested = []
+    for rid, g in imp.groupby("report_id", sort=True):
+        h = g.iloc[0]
+        nested.append(
+            {
+                "report_id": rid,
+                "employee_id": h.employee_id,
+                "employee_name": h.employee_name,
+                "department": h.department,
+                "manager_id": h.manager_id,
+                "report_title": h.report_title,
+                "submitted_date": h.submitted_date,
+                "currency": "USD",
+                "line_items": json.loads(
+                    g.drop(
+                        columns=[
+                            "report_id",
+                            "employee_id",
+                            "employee_name",
+                            "department",
+                            "manager_id",
+                            "report_title",
+                            "submitted_date",
+                            "currency",
+                        ]
+                    ).to_json(orient="records")
+                ),
+            }
+        )
+    (out / "expense_reports.json").write_text(
+        json.dumps({"company": "Techstack.io", "reports": nested}, indent=2)
+    )
+
+    # summary
+    print(
+        f"reports={df.report_id.nunique()}  claims={len(df)}  per-employee reports={df.groupby('employee_id').report_id.nunique().unique()}"
+    )
+    print(f"out-of-policy rate={(~df.in_policy).mean():.3f}")
+    print(df.expected_decision.value_counts().to_string())
+    print(df.loc[~df.in_policy, "violation_type"].value_counts().to_string())
+    print(df.review_reason.replace("", "-").value_counts().to_string())
+
+
+if __name__ == "__main__":
+    main()
+````
+
+### Dataset validator
+Save as: `scripts/validate.py`
+
+````python
+import pandas as pd, yaml
+from datetime import date
+
+p = yaml.safe_load(open("config/policy.yaml"))
+C = p["categories"]
+HC = set(p["city_tiers"]["high_cost"])
+d = pd.read_csv("data/raw/expense_reports.csv").merge(
+    pd.read_csv("data/raw/ground_truth_labels.csv"), on="claim_id"
+)
+
+
+def flags(r):
+    f = []
+    days = (pd.Timestamp(r.submitted_date) - pd.Timestamp(r.expense_date)).days
+    if days > 60:
+        f.append("late")
+    if r.amount > 75 and not r.receipt_attached and r.category != "Mileage":
+        f.append("receipt")
+    cat = r.category
+    if (
+        cat == "Lodging"
+        and r.nights == r.nights
+        and r.amount / r.nights
+        > C["Lodging"]["nightly_cap"][
+            "high_cost" if r.city in HC else "standard"
+        ]
+    ):
+        f.append("cap")
+    if cat == "Meals" and r.amount > 75:
+        f.append("cap")
+    if (
+        cat == "Client Meals"
+        and r.attendees == r.attendees
+        and r.amount / r.attendees > 100
+    ):
+        f.append("cap")
+    if cat == "Conference" and r.amount > 2000:
+        f.append("cap")
+    if cat == "Home Office" and r.amount > 500:
+        f.append("cap")
+    if cat == "Office Supplies" and r.amount > 150:
+        f.append("cap")
+    if cat == "Airfare" and r.fare_class not in ("Economy", "Premium Economy"):
+        f.append("fare")
+    return f
+
+
+d["rf"] = d.apply(flags, axis=1)
+clean = d[d.in_policy]
+print("in-policy rows with hard-rule flags:", (clean.rf.str.len() > 0).sum())
+print(clean[clean.rf.str.len() > 0][["claim_id", "category", "amount", "rf"]])
+dup = d.duplicated(
+    ["employee_id", "expense_date", "merchant", "amount"], keep="first"
+)
+print(
+    "duplicates detected:",
+    dup.sum(),
+    "labeled:",
+    (d.violation_type == "duplicate").sum(),
+    "match:",
+    set(d[dup].claim_id) == set(d[d.violation_type == "duplicate"].claim_id),
+)
+v = d[~d.in_policy]
+print(
+    "violations caught by simple hard rules:",
+    (v.rf.str.len() > 0).sum(),
+    "of",
+    len(v),
+)
+print(v[v.rf.str.len() == 0].violation_type.value_counts())
+````

@@ -1257,6 +1257,80 @@ print(f"{len(json_back['reports'])} reports, {n_items} claims exported")
 
 ---
 
+### Session 13 — 2026-11-27 — Generator weekend fix; 04 re-run, 4h, MLflow
+
+**Done**
+- 01 5a: `WEEKEND_PATTERNS` (weekday 0.50 / sunday_arrival 0.25 /
+  weekend_event 0.25) drawn from `weekend_rng = Random(SEED + 1)`;
+  new purposes "Attend weekend conference", "Weekend go-live support"
+- 01 5b: `build_reports(..., weekend_rand)`
+- 01 6b-2: `booked_nights()`; `make_personal_extension` uses the trip's
+  booked nights (first weekend after last night, else before first
+  night); assert extension never repeats a booked night
+- 01 re-run end to end; 03 re-run; 04 re-run
+- 04: hard-coded pins in 4b-1, 4b-3, 4c replaced by cross-cell checks;
+  4g uses `catch_curve` instead of 4/10
+- 04 4h (new): seed check on the 4e catch curve (20 seeds)
+- 04 cell 5: MLflow runs for "baseline (all 7)" and "no amount"
+  (sqlite `mlflow.db` + `mlruns/` at project root)
+- Committed 01, 04 + data/generated (0641dee); 03 outputs unchanged
+
+**Results**
+- Separate RNG stream: 330 claims, 82 violations, amounts and
+  answer key byte-identical; only dates/purposes/titles changed
+- Lodging by start day: Saturday 7 bad / 8 legit (was 7 / 0);
+  is_weekend 0.14 → 0.48
+- 03 unchanged: 59/82, 0 FP, 237/62/31, false approvals 7.3% ($2,394.30)
+- 04 4a: precision 81.8% (3.3x), recall 32.9%
+- 4b-1: late 11/11, premium 6/6, over_cap 8/16; personal_extension 0
+- 4e: baseline 0/6 at 10, 1/6 at 33 (≈ random 0.8); no amount 2/6 at 10
+- 4g: weekend-lodging rule flags 25 approved, catches 6/6, precision 24%
+- 4c/4d: log_amount now helps slightly (27.0 vs 25.2 ± 0.8);
+  amount_z_in_cat redundant; verdicts flipped vs Session 12
+- 4h: no amount ≥ 1 catch at budget 10 on all 20 seeds; baseline 0 on all
+
+**Errors and fixes**
+- Run All stopped at 4b-1 (`flagged == 24` pin); 4e/4g output shown
+  was stale from Session 12
+- MLflow 3.18: sklearn models save as skops by default →
+  `skops_trusted_types=["sklearn.tree._tree.Tree"]`; `name=` replaces
+  `artifact_path=`; artifacts default to cwd → experiment created with
+  `artifact_location` at project root
+- I001: mlflow imports placed after numpy → moved before (alphabetical)
+
+**Decisions**
+- Fix the generator (not just add a rule); change one thing at a time
+  via a separate RNG stream
+- Weekend lodging = option C: flag routes to agent, human only when
+  agent is unsure; build at start of 05 (flag must not change
+  `rule_decision` in 03)
+- Features: keep all 7 for the all-claims model; "no amount" is the
+  candidate ranker for rule-approved claims (6 positives: not final)
+- Asserts check cross-cell consistency, not hard-coded numbers;
+  keep pins only where the source didn't change (4b-2 `== 23`)
+
+**Learned**
+- A too-perfect rule is a data-generation check; fix the cause
+- Separate RNG streams isolate a change (controlled experiment)
+- Different `randint` ranges consume the stream differently
+- Ablation verdicts that flip with the data are noise
+- Stale notebook output looks like real output: check execution counts
+- MLflow: params / metrics / tags / model; read runs back to verify
+- isort: `import x` before `from x import y`, alphabetical
+  (mlflow < numpy)
+
+**Open items**
+- [ ] Gate answer (04): contamination vs capacity threshold
+- [ ] 01b re-run: update weekday chart + findings (weekend 48%)
+- [ ] **Next: 04b_spend_forecast** cell 1 (load spend_history.csv,
+      resample monthly, STL) — or 05 if forecasting waits
+- [ ] 05 start: weekend-lodging flag (option C) into rules output
+- [ ] Commit the sessions.md update
+- [ ] Still open from Session 11: drift-test grep, cleanup commit,
+      leftover files (gitignore.txt, sessions_2.md)
+
+---
+
 # Appendix — Full file contents
 Every file created in Session 1, so this document can rebuild the project on its own.
 
